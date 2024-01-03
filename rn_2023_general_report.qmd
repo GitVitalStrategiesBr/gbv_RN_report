@@ -1,0 +1,7302 @@
+---
+title: "Violência contra as mulheres: Pareamento de bases de dados para reconstituição de trajetórias"
+subtitle: "Rio Grande do Norte"
+execute:
+  echo: false
+  freeze: true
+knitr:
+  opts_chunk:
+    dpi: 300
+    message: false
+    warning: false
+lang: pt
+toc: true
+self-contained: true
+format:
+  docx: 
+    reference-doc: template.docx
+---
+
+```{r,include=FALSE}
+options(scipen=999)
+
+library(ciTools)
+library(readxl)
+library(tidyverse)
+library(stringr)
+library(stringi)
+library(readstata13)
+library(lubridate)
+library(foreign)
+library(gt)
+library(reshape2)
+library(janitor)
+
+```
+
+# ANÁLISES DA BASE PAREADA
+
+O presente estudo foi realizado em parceria com a Secretaria estadual de Saúde do estado do Rio Grande do Norte e teve como principal objetivo fazer uma análise considerando diferentes fontes de dados disponíveis nos sistemas de informação do Estado. Um linkage determinístico entre cinco importantes bases de dados foi realizada, sendo os sistemas: SINAN Violências, SIH (Sistema de Informações Hospitalares), SIM (Sistema de Informações sobre Mortalidade) para os dados de saúde, e SESED (Secretaria de Estado da Segurança Pública e da Defesa Social) para os dados de segurança pública provenientes de boletins de ocorrência. A análise possibilita a compreensão aprofundada da trajetória de mulheres que foram vítimas de violência nos serviços de saúde e segurança pública, já que os diferentes sistemas demonstram aspectos tanto do comportamento das vítimas sobre busca por serviços públicos, como da qualidade dos registros e do funcionamento da rede.
+
+Para atingir esse propósito, foi traçada uma metodologia de análise a partir de definição de grupos de vítimas. As análises foram feitas separadamente para mulheres que estão vivas e aquelas que foram a óbito. Foram desenvolvidas funções auxiliares para facilitar a análise dos dados e gerar tabelas padronizadas.
+
+Essa abordagem potencializa análises inovadoras sobre as experiências e desafios enfrentados pelas mulheres vítimas de violência no Rio Grande do Norte. Além de contribuir para o conhecimento sobre essa problemática, elas têm o potencial de informar decisões estratégicas e políticas nos sistemas de saúde e segurança, visando aprimorar a assistência e prevenção, bem como fortalecer as respostas apropriadas a essa questão sensível e crucial.
+
+\pagebreak
+
+## Exploração da base pareada - sexo feminino de 2019 a 2021
+
+```{r, include = FALSE}
+# Carregando a base
+## Erik
+path <- "C:/vitalstrategies/data_sicence/rn_2023/dados"
+
+
+# Oli
+# path <- ""
+# load(paste0(path,"/base_linkada_anon_all_years_14sep2023_final.Rdata"))
+load(paste0(path,"/base_linkada_anon_female_2019_2021_14sep2023_final.Rdata"))
+load(paste0(path,"/icd_map_res.Rdata"))
+```
+
+```{r, include=FALSE} 
+# TABELAS AUXILIARES PARA SINAN
+
+# Encaminhamentos
+enc <- data.frame(categoria=c(
+  "rede_enc_sau", 
+  "assit_soc_creas",
+  "rede_educa",
+  "atend_enc_mulh",
+  "cons_enc_tutela",
+  "cons_ido",
+  "deleg_idos",
+  "dir_human",
+  "mpu_enc_mpu",
+  'deleg_enc_cria',
+  "deleg_enc_mulh",
+  "deleg_enc_deleg", 
+  "infan_enc_juv", 
+  "defen_publ",
+  "Total"),
+  ds_tp_enc=c(
+    "Rede da saúde",
+    "Rede assistência social",
+    "Rede educação",
+    "Rede atendimento à mulher",
+    "Conselho Tutelar",
+    "Conselho do Idoso",
+    "Delegacia de atendimento ao idoso",
+    "centro de referência dos direitos Humanos",
+    "Ministério público",
+    "Delegacia Especializada de Proteção à Criança e Adolescente",
+    "Delegacia de atendimento à mulher",
+    "Outras delegacias",
+    "Justiça da infância e da juventude",
+    "Defensoria pública",
+    "Total"
+  )
+)
+
+
+# Relação com o agressor
+rel <- data.frame(categoria=c(
+  "rel_pai", 
+  "rel_mae",
+  "rel_pad",
+  "rel_mad",
+  "rel_conj",
+  "rel_excon",
+  "rel_namo",
+  "rel_exnam",
+  "rel_filho",
+  "rel_irmao",
+  "rel_conhec",
+  "rel_desco",
+  "rel_cuida",
+  "rel_patrao",
+  "rel_inst",
+  "rel_pol",
+  "rel_propri",
+  "rel_outros",
+  "Total"),
+  ds_tp_rel=c(
+    "Pai",
+    "Mãe",
+    "Padrasto",
+    "Madrasta",
+    "Cônjugue",
+    "Ex-cônjuge",
+    "Namorado(a)",
+    "Ex-namorado(a)",
+    "Filho ou filha",
+    "Irmão ou irmã",
+    "Amigo(s)/Conhecido(s)",
+    "Desconhecido",
+    "Cuidador",
+    "Patrão/Chefe",
+    "Pessoa com relação institucional",
+    "Policial/Agente da lei",
+    "Própria pessoa",
+    "Outro tipo de relação",
+    "Total"
+  )
+)
+
+# Violências
+viol <- data.frame(categoria=c(
+  'viol_fisic', 
+  'viol_psico', 
+  'viol_tort', 
+  'viol_sexu', 
+  'viol_traf', 
+  'viol_finan', 
+  'viol_negli', 
+  'viol_infan', 
+  'viol_legal', 
+  'viol_outr',
+  'Total'),
+  ds_tp_viol=c(
+    'Física', 
+    'Psicológica', 
+    'Tortura', 
+    'Sexual', 
+    'Tráfico de humanos', 
+    'Financeira', 
+    'Negligência', 
+    'trabalho infantil', 
+    'Intervenção legal', 
+    'Outros',
+    'Total')
+)
+
+
+# Procedimentos
+proc <- data.frame(categoria=c(
+  'proc_dst', 
+  'proc_hiv', 
+  'proc_hepb', 
+  'proc_sang', 
+  'proc_semen',
+  'proc_vagin', 
+  'proc_contr', 
+  'proc_abort',
+  'Total'
+),
+ds_tp_proc=c(
+  'IST', 
+  'HIV', 
+  'Hepatite B', 
+  'Coleta de sangue', 
+  'Coleta de sêmen', 
+  'Coleta de secreção vaginal', 
+  'Contracepção de emergência', 
+  'Aborto previsto em lei',
+  'Total')
+)
+
+
+```
+
+
+```{r, include = FALSE}
+#1 Definição de funções auxiliares para análise
+# ==========================================================
+# Agrupar pela coluna ds_raca e calcular a contagem e porcentagem de NA em par_f
+tab_1 <- function(df, coluna){
+  
+  df |>
+    dplyr::group_by({{coluna}}) |>
+    dplyr::summarise(contagem = dplyr::n()) |>
+    dplyr::mutate(`%` = round((contagem / nrow(df))*100, 1)) |>
+    dplyr::arrange(-contagem) |>
+    dplyr::bind_rows(
+      df |>
+        dplyr::summarize(
+          {{coluna}} := "Total",
+          contagem = dplyr::n()
+        ) |>
+        dplyr::mutate(`%` = round((contagem / nrow(df)) * 100))
+    )
+  
+}
+## como usar: 
+# raca <- tab_1(vivas_g1, ds_raca)
+
+# ==========================================================
+
+# explicando duas variáveis
+tab_2 <- function(df, var_row, var_col, pct = FALSE, pct_row = FALSE){
+  
+  df <- df |>
+    dplyr::group_by(
+      {{var_row}},
+      {{var_col}}
+    ) |>
+    dplyr::summarise(
+      contagem = dplyr::n(),
+      .groups = 'drop'
+    ) |>
+    tidyr::pivot_wider(
+      names_from = {{var_col}},
+      values_from = c(contagem),
+      values_fill = 0
+    ) |>
+    janitor::adorn_totals("col") |>
+    dplyr::arrange(-Total)
+  
+  if (pct) {
+    df <- df |>
+      dplyr::filter(
+        {{var_row}} != 'Total'
+      ) |>
+      dplyr::mutate(
+        dplyr::across(
+          dplyr::where(is.numeric),
+          ~round((. / sum(.)) * 100, 1)
+        )
+      )
+  }
+  
+  if (pct_row) {
+    df <- df |>
+      dplyr::filter(
+        {{var_row}} != 'Total'
+      ) |>
+      dplyr::mutate(
+        dplyr::across(
+          dplyr::where(is.numeric),
+          ~round((. / Total) * 100, 1)
+        )
+      )
+  }
+  
+  df <- df |> 
+    adorn_totals("row", name = "Total")
+  
+  return(as.data.frame(df))
+}
+
+
+
+## como usar:  
+#tab_2(df_fem, ano, banco, pct=TRUE)
+
+# ==========================================================
+
+# Função para criar a tabela bonita
+tabela_bonita <- function(df, titulo, text_row = FALSE){
+  
+  if (text_row) {
+    
+    df[, 1] <- str_to_title(df[, 1])
+    
+  }
+  
+  df |>
+    gt::gt() |>
+    gt::tab_style(
+      style = list(
+        gt::cell_text(
+          align = "center",
+          weight = 'bold',
+        )
+      ),
+      locations = list(
+        gt::cells_title(groups = c("title"))
+      )) |>
+    gt::tab_header(title = titulo)
+  
+}
+
+
+
+## Como usar:
+#tabela_bonita(raca, "teste tabela raça")
+
+# ==========================================================
+
+## Funçao para multiplas coluans com categorias iguais
+tab_multi <- function(df, lista, filtro){
+  
+  lista <- as_vector(lista)
+  
+  df |> 
+    filter(banco %in% c(filtro)) |>
+    select(
+      par_f, 
+      lista
+    ) |>
+    pivot_longer(
+      cols = c(lista),
+      names_to = "colunas",
+      values_to = "value"
+    ) |>
+    group_by(
+      colunas,
+      value
+    ) |>
+    summarise(
+      contagem = n(),
+      .groups = 'drop'
+    ) |>
+    pivot_wider(
+      names_from = colunas,
+      values_from = contagem,
+      values_fill = 0
+    ) |>
+    as.data.frame() |>
+    # trecho novo
+    filter(
+      value == 1
+    ) |> 
+    mutate(
+      value = ifelse(
+        value == 1, 
+        "Sim", 
+        "Não"
+      )
+    ) |> 
+    ungroup() |> 
+    pivot_longer(
+      -value,
+      names_to = "categoria",
+      values_to = "n"
+    ) |>
+    select(
+      categoria,
+      n
+    ) |> 
+    mutate(pct = round((n/sum(n)*100),1)) |> 
+    arrange(-n) |> 
+    adorn_totals('row') |> 
+    as.data.frame() 
+}
+
+
+# tab_multi(df_fem, proc, 'SINAN')
+
+# ==========================================================
+
+tab_cat_sinan<- function(df,list, col, pct_reg = FALSE, pct_mul = FALSE){
+  
+  # tibble vazia
+  tab_tipo_viol <- tibble()
+  
+  # Transformando a coluna das categorias em lista
+  nomes_violencias <- list |>
+    filter(categoria!='Total') |>
+    select(categoria) |>
+    pull()
+  
+  # Criando coluna de 1
+  df$n_ob <- 1
+  
+  for (i in 1:length(nomes_violencias)){
+    nm <- nomes_violencias[i]
+    f <- as.formula(paste0(nomes_violencias[i], " ~ ", col))
+    tab_enforq <- dcast(
+      df |>
+        filter(banco == 'SINAN'),
+      f, 
+      value.var='n_ob',
+      sum
+    )  |> 
+      adorn_totals("col")
+    # deixando a lista baseado nas categorias anteriores
+    names(tab_enforq) <- 
+      c(paste0('tipo_',deparse(substitute(list))),
+        colnames(tab_enforq |> as.data.frame())[-1])
+    
+    # Criando o nome da coluna dinâmica
+    col_name <- paste0('tipo_', deparse(substitute(list)))
+    
+    tab_enforq <- tab_enforq |> 
+      filter(get(col_name) == 1)  |> 
+      mutate({{col_name}} := nomes_violencias[i])
+    
+    #Juntando os títulos com os dados
+    tab_tipo_viol <- rbind(tab_tipo_viol,tab_enforq)
+    
+  }
+  
+  tab_tipo_viol <- tab_tipo_viol |> as.data.frame() 
+  
+  mapeamento <- unique(list[, c("categoria", colnames(list)[2])])
+  
+  # Substituindo os valores em tab_tipo_viol
+  tab_tipo_viol[[col_name]] <- mapeamento[[colnames(list)[2]]][match(tab_tipo_viol[[col_name]], mapeamento$categoria)]
+  
+  tab_tipo_viol <- tab_tipo_viol |> arrange(-Total)
+  
+  # Seleção das categorias
+  l<-list |> 
+    filter(categoria!='Total') |> 
+    select(categoria)
+  
+  # Linha de quem não tem registros
+  b_pivotado<-
+    df %>%
+    filter(banco == 'SINAN') %>%
+    mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+    filter_at(
+      vars(l$categoria),
+      all_vars(. != 1)
+    ) %>%
+    group_by(get(col)) |> 
+    summarise(n = n()) |> 
+    adorn_totals('row') |> 
+    pivot_wider(
+      names_from = `get(col)`,
+      values_from = n,
+      values_fill = 0
+    ) |>
+    mutate({{col_name}} := case_when(
+      col_name == 'tipo_viol' ~ 'Nenhuma violência registrada',
+      col_name == 'tipo_enc' ~ 'Nenhum encaminhamento',
+      col_name == 'tipo_proc' ~ 'Nenhum procedimento',
+      col_name == 'tipo_rel' ~ 'Nenhum tipo de relacionamento informado',
+      TRUE ~ col_name
+    )) |>
+    as.data.frame()
+  
+  tab_tipo_viol <- bind_rows(tab_tipo_viol, b_pivotado)
+  
+  
+ 
+  #### Linha de registros ####
+  regis <- df %>%
+    filter(banco == 'SINAN') %>%
+    group_by(get(col)) |> 
+    summarise(n = n()) |> 
+    adorn_totals('row') |> 
+    pivot_wider(
+      names_from = `get(col)`,
+      values_from = n,
+      values_fill = 0
+    ) |> 
+    mutate(
+      {{col_name}} := "Número total de registros"
+    ) |> 
+    as.data.frame()
+  
+  
+  tab_tipo_viol<-bind_rows(tab_tipo_viol, regis)
+  tab_tipo_viol[is.na(tab_tipo_viol)] <- 0
+  
+  
+  if (pct_reg) {
+    
+    tab_tipo_viol_a <- tab_tipo_viol |> as.data.frame()
+    # Supondo que '{{col_name}}' seja uma coluna no seu dataframe
+    numerador <- tab_tipo_viol_a %>%
+      filter(get(col_name) != 'Número total de registros') %>%
+      select(-{{col_name}})
+    
+    denominador <- tab_tipo_viol_a %>%
+      filter(get(col_name) == 'Número total de registros') %>%
+      select(-{{col_name}})
+    
+    # Replicando a linha do denominador para ter o mesmo número de linhas que o numerador
+    denominador_replicado <- suppressWarnings(
+      do.call("rbind", 
+              replicate(
+                nrow(numerador), 
+                denominador,
+                simplify = FALSE)
+      )
+    )
+    
+    # Dividindo todas as linhas do numerador pelo denominador replicado
+    result <-  round(numerador / denominador_replicado * 100, 1)
+    
+    # Adicionando a coluna '{{col_name}}' de volta ao resultado
+    result <- cbind(
+      tab_tipo_viol_a %>% 
+        filter(get(col_name) != 'Número total de registros') %>%
+        select({{col_name}}),
+      result)
+    
+    # Convertendo o resultado para um dataframe
+    tab_tipo_viol <- as.data.frame(result)
+  }
+  
+  
+  if (pct_mul) {
+    
+    mulheres <- df %>%
+      filter(banco == 'SINAN') %>%
+      distinct(
+        par_f,
+        ds_raca,
+        faixa_etaria_padrao
+      ) |> 
+    group_by(get(col)) |> 
+      summarise(n = n()) |> 
+      adorn_totals('row') |> 
+      pivot_wider(
+        names_from = `get(col)`,
+        values_from = n,
+        values_fill = 0
+      ) |> 
+      mutate(
+        {{col_name}} := "Número de mulheres"
+      ) |> 
+      as.data.frame()
+    
+    
+    tab_tipo_viol<- tab_tipo_viol |> as.data.frame()
+    numerador <- tab_tipo_viol %>%
+      filter(get(col_name) != 'Número total de registros')
+    
+    tab_tipo_viol<-bind_rows(tab_tipo_viol, mulheres)
+    
+    
+    tab_tipo_viol_a <- tab_tipo_viol |> as.data.frame()
+    # Supondo que '{{col_name}}' seja uma coluna no seu dataframe
+    numerador <- tab_tipo_viol_a %>%
+      filter(get(col_name) != 'Número de mulheres') %>%
+      select(-{{col_name}})
+    
+    denominador <- tab_tipo_viol_a %>%
+      filter(get(col_name) == 'Número de mulheres') %>%
+      select(-{{col_name}})
+    
+    # Replicando a linha do denominador para ter o mesmo número de linhas que o numerador
+    denominador_replicado <- suppressWarnings(
+      do.call("rbind", 
+              replicate(
+                nrow(numerador), 
+                denominador,
+                simplify = FALSE)
+      )
+    )
+    
+    # Dividindo todas as linhas do numerador pelo denominador replicado
+    result <-  round(numerador / denominador_replicado * 100, 1)
+    
+    # Adicionando a coluna '{{col_name}}' de volta ao resultado
+    result <- cbind(
+      tab_tipo_viol_a %>% 
+        filter(get(col_name) != 'Número de mulheres') %>%
+        select({{col_name}}),
+      result)
+    
+    # Convertendo o resultado para um dataframe
+    tab_tipo_viol <- as.data.frame(result)
+    
+    tab_tipo_viol <- tab_tipo_viol |> 
+      filter(get(col_name) != 'Número total de registros')
+  }
+  
+  return(tab_tipo_viol)
+  
+}
+
+# tab_cat_sinan(vivas_g1, viol, 'faixa_etaria_padrao')
+
+# ==========================================================
+
+check_missing <- function(data) {
+  
+  # Criação de dataframe expondo valores vazios por coluna - em linha
+  missing_value_df <- data.frame(
+    column_name = names(data),
+    percent_missing = round(colSums(is.na(data)) * 100 / nrow(data), 3)
+  )
+  
+  # Retorna apenas colunas com % de vazios maiores que 0%
+  missing_value_df <- missing_value_df[missing_value_df$percent_missing > 0, ]
+  missing_value_df <- missing_value_df[order(-missing_value_df$percent_missing), ]
+  
+  # Redefine o índice
+  rownames(missing_value_df) <- NULL
+  
+  return(missing_value_df)
+}
+# ==========================================================
+
+#######
+### FUNÇÃO PARA FAZER RESUMO DAS VARIÁVEIS DE DIA
+#######
+summary_days <- function(df, variavel){
+  df |> 
+    distinct() |> 
+    summarise(
+      `Número de observações` = sum(!is.na({{variavel}})),
+      `Média de dias` = round(mean({{variavel}}, na.rm = TRUE), 1),
+      `Menor diferença` = round(min({{variavel}}, na.rm = TRUE), 1),
+      `Maior diferença` = max({{variavel}}, na.rm = TRUE),
+      `1º Quartil` = quantile({{variavel}}, 0.25),
+      `Mediana` = median({{variavel}}, na.rm = TRUE),
+      `3º Quartil` = quantile({{variavel}}, 0.75),
+      `Registros com valores iguais a zero` = sum({{variavel}} == 0, na.rm = TRUE),
+      `Registros com valores negativos` = sum({{variavel}} < 0, na.rm = TRUE),
+      `Registros com valores positivos` = sum({{variavel}} > 0, na.rm = TRUE)
+    ) |>
+    t() |> 
+    as.data.frame() |> 
+    rownames_to_column(var = "Medida resumo") |> 
+    rename(
+      "Valores" = V1
+    )
+}
+
+
+#tab_cat_sinan(vivas_g1, enc, 'ds_raca')
+
+```
+
+```{r, include=FALSE, warning=FALSE}
+
+# novo df para mulheres: df_linkada
+
+df_fem <- 
+  df_linkada_fem_2019_2021_2 |> 
+  dplyr::filter(
+    sg_sexo == "F"
+  )
+
+
+df_fem <-
+  df_fem %>%
+  mutate(
+    rede_enc_sau = case_when((rede_sau=="1" | enc_saude=="1")~1,
+                             T~0),
+    assit_soc_creas = case_when((assist_soc=="1" |enc_creas=="1")~1,
+                                T~0), # abrigo
+    atend_enc_mulh = case_when((atend_mulh=="1" | enc_mulher=="1")~1,
+                               T~0),
+    cons_enc_tutela = case_when((cons_tutel=="1" | enc_tutela=="1")~1,
+                                T~0),
+    mpu_enc_mpu = case_when((mpu=="1" | enc_mpu=="1")~1,
+                            T~0),
+    deleg_enc_cria = case_when((deleg_cria=="1"|enc_dpca=="1")~1,
+                               T~0),
+    deleg_enc_mulh = case_when((deleg_mulh=="1"| enc_deam=="1")~1,
+                               T~0),
+    deleg_enc_deleg = case_when((deleg=="1"|enc_deleg=="1")~1,
+                                T~0),
+    infan_enc_juv = case_when((infan_juv=="1"|enc_vara=="1")~1,
+                              T~0)
+  )
+
+rm(df_linkada_fem_2019_2021_2)
+
+```
+
+```{r, include=FALSE}
+# # Número de obsevações
+row_link <- nrow(df_fem)
+```
+
+```{r, include=FALSE}
+# # número de variáveis 
+col_link <- ncol(df_fem)
+```
+
+```{r, include=FALSE}
+# # Número de registros totais distintos após o linkage
+distintos <- length(unique(df_fem$par_1))
+```
+
+```{r, include=FALSE}
+# tabela auxiliar para calcular só mulheres
+# registros de mulheres
+fem_dist <- length(unique(df_fem$par_f))
+
+
+```
+
+
+```{r, include=FALSE}
+
+linkage_sexo <- tab_1(df_fem, banco)|> 
+  mutate(
+    banco = ifelse(
+      banco == "SESAP", "SESED", ifelse(
+        banco == "SESAP_OB", "SESED óbitos", banco
+       )
+     )
+  ) |> 
+    rename(
+    "n" = contagem,
+    "Banco de dados" = banco
+  ) 
+# # Tabela a ser printada
+bnc_sx <-
+  tabela_bonita(
+    linkage_sexo,
+    "Distribuição de registros e respectiva proporção nos bancos analisados segundo sexo. Rio Grande do Norte, 2009-2022"
+  )
+#   tab_footnote("")
+```
+
+
+```{r, include=FALSE}
+
+num_unico <- df_fem |> 
+        select(
+          par_f,
+          faixa_etaria_padrao,
+          sg_sexo,
+          ds_raca
+        ) |>
+        distinct()
+
+# faixa etária e sexo
+fx_sx <-
+  tabela_bonita(
+    tab_1(
+      num_unico , 
+      faixa_etaria_padrao
+     # sg_sexo
+    ) |> 
+      arrange(faixa_etaria_padrao) |> 
+      rename(
+        "Faixa etária"= faixa_etaria_padrao,
+        "n" = contagem
+      ),
+    "Distribuição de registros por faixa etária das mulheres pareadas, Rio Grande do Norte, 2009-2022"
+  )
+```
+
+```{r, include=FALSE}
+
+# Raça cor,por sexo - numero
+linkada_raca_sexo_num <-
+  tab_1(
+    df_fem |> 
+      select(
+        par_f,
+        ds_raca,
+        sg_sexo,
+        faixa_etaria_padrao
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |> 
+  rename(
+    "n" = contagem,
+    "Raça/cor" = ds_raca
+  ) |> 
+  as.data.frame()
+
+# % de pessoas com registros de raça diferentes entre as bases
+link_rac_sx <-
+  tabela_bonita(
+    linkada_raca_sexo_num,
+    'Distribuição de raça/cor das mulheres na base pareada, Rio Grande do Norte (2009-2022)',
+    text_row = TRUE)
+
+num_unico <- num_unico |> nrow()
+
+```
+
+```{r, include=FALSE}
+# registros por ano e banco
+lk_banco_ano <-
+  tab_2(
+    df_fem,
+    ano,
+    banco
+  ) |>
+  filter(
+    ano > 2008
+  ) |>
+  rename(
+    "SESED óbitos" = SESAP_OB,
+    "SESED" = SESAP,
+    "Ano" = ano
+  ) |>
+  arrange(Ano)
+```
+
+```{r, include=FALSE}
+
+# Todos os bancos por ano
+lk_banco_ano_b <- 
+  tabela_bonita(
+    lk_banco_ano, 
+    "Distribuição de registros por ano e por banco de dados da base pareada e sexo feminino, Rio Grande do Norte (2019-2021)")
+  # ) |> 
+  # tab_footnote("* Foram registradas 9 notificações no banco do SINAN entre 2007 e 2008")
+
+```
+
+
+As bases de dados foram disponibilizadas por diferentes setores do governo – saúde, segurança e assistência – para diferentes períodos temporais, de acordo com a disponibilidade de dados e o histórico de cada um dos sistemas. No entanto, os sistemas possuem quantidades de registros diversas ao longo dos anos: alguns sistemas datam de 2010, como o SINAN, enquanto outros passam a ter um volume maior de registros em períodos mais recentes, como o da Segurança Pública. Por isso, foi selecionado um período de três anos (2019-2021) para o estudo aqui apresentado, considerando ser o período com maior completude de informações entre os diferentes sistemas. 
+
+`r lk_banco_ano_b`
+
+Analisando as proporções de registros entre os diferentes bancos, nota-se que o maior volume de registros é do Sistema de Informações Hospitalares (SIH), seguido pelos registros de Boletins de Ocorrência de crimes não letais (SESED) e Sistema de Mortalidade (SIM), conforme tabela a seguir:
+
+`r bnc_sx`
+
+Estes registros contêm dados de pessoas do sexo feminino no período de 2019 a 2021, uma vez que o objetivo do estudo é fazer uma  análise a violência contra a mulher no estado do Rio Grande do Norte
+
+##### Mulheres x Registros
+
+As análises da base pareada podem ser feitas a partir de duas perspectivas: considerando a quantidade de registros disponíveis (o n total da base) ou a quantidade de mulheres que aparecem entre as diferentes bases de dados.Após a execução do linkage das bases de dados, pode-se identificar a trajetória de uma mulher e cada uma pode apresentar um ou mais registros. Ao longo do relatório, os títulos das tabelas indicam quando os dados tratam de registros e quando tratam de mulheres, bem como o valor utilizado para o cálculo das proporções.
+
+Uma metodologia determinística para realização do linkage entre múltiplas bases de dados apresenta desafios, uma vez que os sistemas de informações foram gerados com diferentes propósitos, pode conter incoerências de registros, variações na qualidade dos dados e diferenças na formatação das bases de dados. Além disso, a tarefa de identificar registros correspondentes de uma mesma mulher em meio a diversas fontes de dados requer algoritmos complexos e estratégias de comparação cuidadosamente projetadas para minimizar erros e garantir resultados precisos.
+
+Assim como toda metodologia, o linkage apresenta também limitações, sendo a principal identificação de todos os registros para uma mesma pessoa, o que significa que por vezes, por falta de informações entre as bases, a mesma mulher pode não ser captada. Por outro lado, o algoritmo foi ajustado para evitar a não identificação de mulheres distintas como sendo a mesma mulher ao fim do processo. Nesse sentido, destaca-se que, no momento de interpretar os dados gerados neste processo, é importante sempre se atentar às limitações da metodologia e considerar que há informações que podem não ter sido captadas pelo algoritmo, em especial ao se considerar os dados fornecidos de acordo com as fontes de dados.
+
+O número de registros (n) da tabela abaixo mostra a quantidade de registros em cada uma das fontes. As mulheres representam as mulheres únicas  identificadas neste processo. Estas mulheres únicas podem aparecer em apenas um dos bancos de dados, seja por possuir um registro único, seja por não terem seus registros pareados entre as bases. 
+
+`r fx_sx`
+
+
+\
+A variável raça/cor recebeu um tratamento específico. Considerando que a raça não foi registrada uniformemente para uma mesma pessoa (p.ex. casos em que uma mesma pessoa está registrada como “Branca” no SIH e “Parda” no SINAN), foi criada uma regra para a uniformização do campo entre as diferentes bases de dados. Sempre que houver discrepância entre a raça de uma mesma pessoa entre diferentes bancos, a preferência é para a categoria Preta, Parda, Amarela ou Indígena, nesta ordem. Isso significa que, se uma mesma pessoa foi registrada como “Parda” em um sistema e “Preta” em outro, a preferência é pela categoria “Preta”. [
+
+A partir desse tratamento, a distribuição de registros  por raça/cor na base pareada ocorre da seguinte forma:
+
+`r link_rac_sx`
+
+# Análise de coortes
+
+```{r, include=FALSE}
+
+###################
+## MULHERES VIVAS ##
+###################
+
+# Grupo de mulheres vivas 1
+vivas_g1 <- 
+  df_fem |> 
+  filter(
+    viva_recorte1 == 1
+  )
+
+# mulheres unigas grupo 1 vivas
+g1v_unicas <- 
+  vivas_g1 |> 
+  select(
+    par_f,
+    faixa_etaria_padrao,
+    ds_raca,
+    banco
+  ) |> 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+
+# Grupo de mulheres vivas 2
+vivas_g2 <- df_fem |> 
+  filter(
+    viva_recorte2 == 1
+  )
+
+# mulheres unigas grupo 2 vivas
+g2v_unicas <- 
+  vivas_g2 |> 
+  select(
+    par_f,
+    faixa_etaria_padrao,
+    ds_raca,
+    banco
+  ) |> 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+
+# Grupo de mulheres vivas 3
+vivas_g3 <- df_fem |> 
+  filter(
+    viva_recorte3 == 1
+  )
+
+# mulheres unigas grupo 3 vivas
+g3v_unicas <- 
+  vivas_g3 |> 
+  select(
+    par_f,
+    faixa_etaria_padrao,
+    ds_raca,
+    banco
+  ) |> 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+
+# Grupo de mulheres vivas 4
+vivas_g4 <- df_fem |> 
+  filter(
+    viva_recorte4 == 1
+  )
+
+# mulheres unigas grupo 4 vivas
+g4v_unicas <- 
+  vivas_g4 |> 
+  select(
+    par_f,
+    faixa_etaria_padrao,
+    ds_raca,
+    banco
+  ) |> 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+# Grupo de mulheres vivas 5
+vivas_g5 <- df_fem |> 
+  filter(
+    viva_recorte5 == 1
+  )
+
+# mulheres unigas grupo 5 vivas
+g5v_unicas <- 
+  vivas_g5 |> 
+  select(
+    par_f,
+    faixa_etaria_padrao,
+    ds_raca,
+    banco
+  ) |> 
+  distinct()
+
+```
+
+```{r, include = FALSE}
+###################################
+### MULHERES QUE VIERAM A ÓBITO ###
+###################################
+
+# Grupo de mulheres mortas 1
+mortas_g1 <- df_fem %>% 
+  filter(
+    ob_recorte1 == 1,
+    banco!='SESAP_OB'
+  )
+
+# mulheres únicas no grupo de mulheres mortas 1
+g1m_unicas <-
+  mortas_g1 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco
+  ) %>% 
+  distinct()
+
+```
+
+```{r, include = FALSE}
+
+# Grupo de mulheres mortas 2
+mortas_g2 <- df_fem %>% 
+  filter(
+    ob_recorte2 == 1
+  )
+# mulheres únicas no grupo de mulheres mortas 2
+g2m_unicas <-
+  mortas_g2 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco
+  ) %>% 
+  distinct()
+
+```
+
+```{r, include = FALSE}
+
+# Grupo de mulheres mortas 3
+mortas_g3 <- df_fem %>% 
+  filter(
+    ob_recorte3 == 1
+  )
+
+# mulheres únicas no grupo de mulheres mortas 3
+g3m_unicas <-
+  mortas_g3 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    # banco
+  ) %>% 
+  distinct()
+
+```
+
+```{r, include = FALSE}
+# mulheres únicas no grupo de mulheres mortas 4
+mortas_g4 <- df_fem %>% 
+  filter(
+    ob_recorte4 == 1
+  )
+# mulheres únicas no grupo de mulheres mortas 4
+g4m_unicas <-
+  mortas_g4 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco
+  ) %>% 
+  distinct()
+```
+
+```{r, include = FALSE}
+# mulheres únicas no grupo de mulheres mortas 5
+mortas_g5 <- df_fem %>% 
+  filter(
+    ob_recorte5 == 1
+  )
+# mulheres únicas no grupo de mulheres mortas 5
+g5m_unicas <-
+  mortas_g5 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco
+  ) %>% 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+# Número de mulheres
+num_group <- function(df){
+  
+  df |> 
+    select(
+      par_f,
+      ds_raca,
+      faixa_etaria_padrao
+    ) |> 
+    distinct() |> 
+    nrow()
+  
+}
+
+
+# Número de registros
+num_reg <- function(df){
+  
+  df |> 
+    select(
+      par_f,
+      ds_raca,
+      faixa_etaria_padrao
+    ) |> 
+    #  distinct() |> 
+    nrow()
+  
+}
+
+# Função para criar as tabelas de comparação
+cria_tabela <- function(funcao){
+  
+  #g1 viva
+  g1v_n <- funcao(vivas_g1)
+  #g2 viva
+  g2v_n <- funcao(vivas_g2)
+  #g3 viva
+  g3v_n <- funcao(vivas_g3)
+  #g4 viva
+  g4v_n <- funcao(vivas_g4)
+  #g5 viva
+  g5v_n <- funcao(vivas_g5)
+  
+  #g1 morta
+  g1m_n <- funcao(mortas_g1)
+  #g2 morta
+  g2m_n <- funcao(mortas_g2)
+  #g3 morta
+  g3m_n <- funcao(mortas_g3)
+  #g4 morta
+  g4m_n <- funcao(mortas_g4)
+  #g5 morta
+  g5m_n <- funcao(mortas_g5)
+  
+  sim <- 
+    df_fem |> 
+    filter(
+      FL_SESAP == 0,
+      FL_SESAP_OB == 0,
+      FL_SIH == 0,
+      FL_SIM == 1,
+      FL_SINAN == 0,
+      fl_diag_sex_agressao == 0,
+      fl_viol_sex == 0
+    ) |> 
+    funcao()
+  
+  # Exclusivo SIM
+  sim <- 
+    df_fem |> 
+    filter(
+      FL_SESAP == 0,
+      FL_SESAP_OB == 0,
+      FL_SIH == 0,
+      FL_SIM == 1,
+      FL_SINAN == 0,
+      fl_diag_sex_agressao == 0,
+      fl_viol_sex == 0
+    ) |> 
+    funcao()
+  
+  # Exclusivo SIH
+  sih <- 
+    df_fem |> 
+    filter(
+      FL_SESAP == 0,
+      FL_SESAP_OB == 0,
+      FL_SIH == 1,
+      FL_SIM == 0,
+      FL_SINAN == 0,
+      fl_diag_sex_agressao == 0,
+      fl_viol_sex == 0
+    ) |> 
+    funcao()
+  
+  # SIM e SIH
+  sih_sim <- 
+    df_fem |> 
+    filter(
+      FL_SESAP == 0,
+      FL_SESAP_OB == 0,
+      FL_SIH == 1,
+      FL_SIM == 1,
+      FL_SINAN == 0,
+      fl_diag_sex_agressao == 0,
+      fl_viol_sex == 0
+    ) |> 
+    funcao()
+  
+  # SIH e SIM com diagnostico de agressao
+  sih_sim_agr <- 
+    df_fem |> 
+    filter(
+      FL_SESAP == 0,
+      FL_SESAP_OB == 0,
+      FL_SIH == 1,
+      FL_SIM == 1,
+      FL_SINAN == 0,
+      fl_diag_sex_agressao == 1,
+      fl_viol_sex == 0
+    ) |> 
+    funcao()
+  
+  # Construção da tabela
+  tabela_comparacao <-
+    data.frame(
+      Grupo = c(
+        "Vivas 1. Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência",
+        "Vivas 2. Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN",
+        "Vivas 3. Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN",
+        "Vivas 4. Mulheres com notificação de violência sexual no SINAN",
+        "Vivas 5. Mulheres com registro de internação no SIH, que apresentam diagnóstico secundário de autolesão ou agressão.",
+        "Óbito 1. Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN",
+        "Óbito 2. Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN",
+        "Óbito 3. Mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal ",
+        "Óbito 4. Mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM",
+        "Óbito 5. Mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal",
+        "Exclusivo SIM",
+        "Exclusivo SIH",
+        "SIH e SIM",
+        "SIH, SIM e Diagnóstico de agressão"
+      ),
+      Mulheres = c(
+        g1v_n,
+        g2v_n,
+        g3v_n,
+        g4v_n,
+        g5v_n,
+        g1m_n,
+        g2m_n,
+        g3m_n,
+        g4m_n,
+        g5m_n,
+        sim,
+        sih,
+        sih_sim,
+        sih_sim_agr
+      )
+    ) |>
+    as.data.frame()
+  return(tabela_comparacao)
+}
+
+
+# Tabela de comparação entre o numero de mulheres
+tabela_comparacao_num <- cria_tabela(num_group)
+# Tabela de comparação entre o numero de registros
+tabela_comparacao_reg <- cria_tabela(num_reg)
+
+
+# Join das tabelas
+resultado_comparacao <- tabela_comparacao_num |> 
+  full_join(tabela_comparacao_reg, by = "Grupo") |> 
+  rename(
+    "Número de mulheres" = Mulheres.x,
+    "Número de registros" = Mulheres.y
+  )
+
+tabela_comparacao <-
+  tabela_bonita(resultado_comparacao, "Tabela de comparação entre o número de mulheres e o número de registros entre os recortes e fora do recorte, Rio Grande do Norte (2019-2021)")
+
+df_fem |> filter(FL_CAD_UNICO_PESSOA == 1) |> 
+  select(par_f,FL_CAD_UNICO_PESSOA, banco) |> 
+  tab_1(banco)
+
+```
+
+A base pareada traz diversas possibilidades de análise. Nesta etapa, foi optado por iniciar a análise dividindo as mulheres entre grupos, ou coortes, com características similares.
+
+A primeira divisão foi feita entre mulheres com e sem registro de óbito. Os grupos se dividem da seguinte forma:
+
+**Mulheres Vivas**
+
+i\. mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência;
+
+ii\. mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN;
+
+iii\. mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN;
+
+iv\. mulheres com notificação de violência sexual no SINAN;
+
+v\. mulheres com registro de internação no SIH, que apresentam diagnóstico secundário de autolesão ou agressão.
+
+Já para o grupo das mulheres com registro de óbito, foram investigados os seguintes grupos:
+
+**Mulheres que Foram a Óbito**
+
+i\. mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN;
+
+ii\. mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN;
+
+iii\. mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal;
+
+iv\. mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM;
+
+v\. mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal.
+
+
+O conjunto de dados em questão abrange um total de `r num_group(df_fem)` mulheres distintas. É importante destacar que uma mesma mulher pode ser contabilizada em mais de um grupo, o que implica que a soma dos números de mulheres após a distribuição entre os grupos será superior ao número total de mulheres na base. Essa consideração é aplicável também ao número total de registros, que é de `r num_reg(df_fem)`.
+
+Adicionalmente, é importante salientar que as mulheres que apareceram exclusivamente nos conjuntos de dados SIM, SIH, ou em suas interseções (incluindo diagnósticos secundários de agressão) não foram alocadas em grupos específicos. Isso respeita a lógica da exclusão desses casos específicos ao se formar grupos distintos.
+
+`r tabela_comparacao`
+
+\pagebreak
+
+## MULHERES VIVAS
+
+### 1. Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência
+
+Este grupo identifica mulheres que tiveram uma situação de violência identificada por equipes de saúde e notificada no SINAN, mas que não procuraram a Delegacia para registrar ocorrência. Elas podem ou não ter registros de internação no SIH. Neste grupo, consideramos apenas aquelas que não possuem registro de óbito e, portanto, estão vivas.
+
+
+```{r, include=FALSE}
+
+# mulheres vivas que estão no SINAN e no SIH
+## Filtragem pela variável `banco` da resultado diferente do filtr por FL_SIH
+g1v_sinan_sih <- 
+  vivas_g1 |> 
+  filter(banco == 'SIH') |> 
+  select(
+    par_f, 
+    #banco, 
+    ds_raca, 
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+g1v_unicas |> 
+  filter(banco == 'SINAN') |> 
+  select(
+    par_f, 
+    #banco, 
+    ds_raca, 
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+tab_1(vivas_g1, banco)
+
+vivas_g1 |> 
+  select(par_f) |> 
+  distinct() |> 
+  nrow()
+
+```
+
+```{r, include=FALSE}
+
+# mulheres vivas que estão apenas no SINAN
+g1v_sinan <-
+  vivas_g1 |> 
+  # filter(
+  #   banco == 'SINAN'
+  # ) |> 
+  select(
+    par_f, 
+    # banco, 
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow() - g1v_sinan_sih
+
+tab_1(vivas_g1, banco)
+###############################################################
+### TESTE PARA DETECTAR MULHERES COM FAIXA-ETÁRIA DIFERENTE ###
+###############################################################
+
+vivas_g1 |> 
+  select(
+    par_f,
+    ds_raca,
+    #  faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+```
+
+```{r, include=FALSE}
+
+g1v_banco_dados<-
+  data.frame(
+    banco = c(
+      "SINAN e SIH",
+      "Exclusivo SINAN"),
+    n = c(
+      g1v_sinan_sih,
+      g1v_sinan
+    )
+  ) |> 
+  mutate(porcentagem = round(n/sum(n)*100,1)) |> 
+  arrange(-n) |> 
+  adorn_totals('row')
+
+g1v_banco_dados <- 
+  g1v_banco_dados |> 
+  rename(
+    "Banco de dados" = banco,
+    "%" = porcentagem
+  )
+
+# Criação de dataframe com a distribuição de mulheres por banco
+g1v_freq_banco <- 
+  tabela_bonita(
+    g1v_banco_dados,
+    "Distribuição de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência por banco de dados, Rio Grande do Norte (2019-2021)"
+  )
+
+
+```
+
+```{r, include=FALSE}
+# numero de mulheres distintas no grupo1
+g1v_distintos <- 
+  vivas_g1 |> 
+  select(
+    par_f, 
+    #banco, 
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+```
+
+O grupo possui `r vivas_g1 |> nrow()` registros no total, considerando SIH e SINAN. Esses registros são correspondentes a atendimentos de `r g1v_distintos` mulheres distintas, com a seguinte distribuição:
+
+`r g1v_freq_banco`
+
+#### 1.1 Perfil das vítimas
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g1v_fx_banco <- 
+  tabela_bonita(
+    vivas_g1  |>  
+      select(
+        par_f,
+        #banco, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |>  
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g1v_fx_banco_prop <- 
+  tabela_bonita(
+    vivas_g1 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct() %>%
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de raça/cor por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("* A proporção de mulheres pardas representam cerca de 53%, seguidos de 20% de mulheres brancas e 20% de dados ignorados")
+
+```
+
+```{r, include = FALSE}
+# Tabela de faixa-etária para o grupo 1
+g1v_fx_banco_prop_col <- 
+  tabela_bonita(
+    vivas_g1 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct() %>%
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de faixa etária por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("* A proporção de mulheres pardas representam cerca de 53%, seguidos de 20% de mulheres brancas e 20% de dados ignorados")
+```
+
+```{r, include = FALSE}
+# Idade
+g1v_idade <- 
+  tab_1(
+    g1v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g1v_idade<-
+  tabela_bonita(
+    g1v_idade,
+    "Faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g1v_raca <- 
+  tab_1(
+    g1v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g1v_raca<-
+  tabela_bonita(
+    g1v_raca,
+    "Raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+
+
+Esta coorte é composta majoritariamente por mulheres pardas entre 30 e 59 anos de idade. Este grupo etário predomina entre todos os grupos raciais. Com exceção do grupo de mulheres indígenas, todas as outras categorias raciais nessa mesma faixa etária representam uma proporção igual ou superior a 33%.
+
+
+<p>
+`r g1v_idade`<br>
+`r g1v_raca`
+</p>
+
+#### 1.2 Caracterização da violência
+
+```{r,include=FALSE}
+
+tab_viols <- tab_multi(
+  vivas_g1, viol[viol$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(viol,by="categoria",all.x=T) |> 
+  select(ds_tp_viol,n) |> 
+  mutate(`%` = round(n/g1v_distintos*100,1)) |> 
+  rename("Tipo de violência"=ds_tp_viol) |> 
+  arrange(-n)
+
+tab_viols <- bind_rows(
+  filter(tab_viols,!`Tipo de violência`=="Total")
+) 
+
+tab_viols <-
+  tab_viols |> 
+  filter(n>100) 
+
+g1v_viol <- 
+  tabela_bonita(
+    tab_viols,
+    "Tabela de frequência e proporção de Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência por Tipos de violência, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* O denominador da porcentagem é o número de mulheres únicas.")
+
+
+# por raça/cor
+g1v_viol_raca <- tab_cat_sinan(vivas_g1, viol, "ds_raca") |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1v_viol_raca <- 
+  tabela_bonita(
+    g1v_viol_raca,
+    "Tipo de violência por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+# prop
+g1v_viol_raca_p <- tab_cat_sinan(vivas_g1, viol, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1v_viol_raca_p <- 
+  tabela_bonita(
+    g1v_viol_raca_p,
+    "Proporção do tipo de violência por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+    )
+
+vivas_g1 |> distinct(par_f) |> nrow()
+  # por idade
+g1v_viol_idade <- tab_cat_sinan(vivas_g1, viol, "faixa_etaria_padrao") |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1v_viol_idade <- 
+  tabela_bonita(
+    g1v_viol_idade,
+    "Tipo de violência por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# Prop
+
+g1v_viol_idade_p <- tab_cat_sinan(vivas_g1, viol, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1v_viol_idade_p <- 
+  tabela_bonita(
+    g1v_viol_idade_p,
+    "Proporção do tipo de violência por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+
+
+```
+
+As notificações do SINAN possuem um campo para a identificação do tipo de violência sofrido pela vítima. Uma mesma mulher pode ter na notificação mais de um tipo de violência e, portanto, a soma total de tipos de violência ultrapassa a quantidade de registros e de mulheres.
+
+<p>
+`r g1v_viol` <br>
+`r g1v_viol_raca` <br>
+`r g1v_viol_raca_p` <br>
+`r g1v_viol_idade` <br>
+`r g1v_viol_idade_p` <br>
+</p>
+
+Para este grupo, predomina  a violência física, que aparece em 60.1% das notificações. O percentual de notificações de violência registradas como “outro” é de 25.2%.
+
+#### 1.3 Encaminhamentos no SINAN
+
+```{r, include=FALSE}
+
+tab_enc <- tab_multi(
+  vivas_g1, enc[enc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(enc,by="categoria",all.x=T) |> 
+  select(ds_tp_enc,n) |> 
+  mutate(porcentagem = round(n/g1v_distintos*100,1)) |> 
+  rename("Tipo de encaminhamento"=ds_tp_enc) |> 
+  arrange(-n)
+
+tab_enc <- bind_rows(
+  filter(tab_enc,!`Tipo de encaminhamento`=="Total")
+)
+
+tab_enc <- 
+  tab_enc |> 
+  filter(
+    n > 100
+  ) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+g1v_enc <- 
+  tabela_bonita(
+    tab_enc,
+    "Tabela de frequência e proporção do tipo de encaminhamento de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* O denominador da porcentagem é o número de mulheres do grupo (7074).")
+
+
+# por raça/cor
+g1v_enc_raca <- tab_cat_sinan(vivas_g1, enc, "ds_raca") |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1v_enc_raca <- 
+  tabela_bonita(
+    g1v_enc_raca,
+    "Tipo de encaminhamento por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# prop
+# por raça/cor
+g1v_enc_raca_p <- tab_cat_sinan(vivas_g1, enc, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1v_enc_raca_p <- 
+  tabela_bonita(
+    g1v_enc_raca_p,
+    "Proporções por tipo de encaminhamento por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# por idade
+g1v_enc_idade <- tab_cat_sinan(vivas_g1, enc, "faixa_etaria_padrao") |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1v_enc_idade <- 
+  tabela_bonita(
+    g1v_enc_idade,
+    "Tipo de encaminhamento por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)")
+    
+# PROPORÇÃO
+
+g1v_enc_idade_p <- tab_cat_sinan(vivas_g1, enc, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1v_enc_idade_p <- 
+  tabela_bonita(
+    g1v_enc_idade_p,
+    "Proporções por tipo de encaminhamento por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Na ficha do SINAN Violências, os encaminhamentos desempenham um papel fundamental, uma vez que têm o propósito de assegurar o apoio e a assistência adequada às vítimas após a ocorrência de atos violentos. Ao analisar o grupo de mulheres que não procuraram a polícia, destacam-se algumas estatísticas significativas:
+
+1- Encaminhamento para a Rede de Assistência Social:
+
+2 - Encaminhamento para a Rede de Assistência Social: Observou-se que 17.1% das vítimas foram encaminhadas para a Rede de Assistência Social. Esse encaminhamento sugere que essas mulheres podem necessitar de apoio abrangente, como abrigo temporário, auxílio financeiro, orientação jurídica e outros tipos de suporte social.
+
+3 - Encaminhamento para o Conselho Tutelar: Em 10.6% dos casos, houve encaminhamento para o Conselho Tutelar. Essa estatística pode indicar a ocorrência de violências direcionadas a menores de idade, que necessitam de uma abordagem específica para proteger os direitos e o bem-estar das crianças envolvidas.
+
+4 - Encaminhamento para a Rede de Atendimento à Mulher: Surpreendentemente, apenas 7.3% das vítimas foram direcionadas para a Rede de Atendimento à Mulher. Esse dado sugere que, em comparação com outros tipos de encaminhamentos, a assistência direcionada a mulheres vítimas de violência pode ser menos frequente, o que pode requerer maior atenção e intervenção nessa área.
+
+Para analisar a tabela, é importante ressaltar que o denominador das proporções foi o número de mulheres (`r g1v_distintos`) e não o de registros.
+
+<p>
+`r g1v_enc`<br>
+`r g1v_enc_raca` <br>
+`r g1v_enc_raca_p` <br>
+`r g1v_enc_idade`<br>
+`r g1v_enc_idade_p`<br>
+</p>
+
+#### 1.4 Procedimentos no SINAN de mulheres que sofreram violência sexual
+
+```{r, include=FALSE}
+
+# Mulheres que sofreram violencia sexual
+vivas_g1_viol_sex <- 
+  vivas_g1 |> 
+  filter( 
+    viol_sexu == 1
+  )
+
+# número único de mulheres que sofreram viol sexual
+vivas_g1_viol_sex_num = 
+  vivas_g1_viol_sex |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique() |> 
+  nrow()
+
+# Gerando tabela multi
+tab_proc <- tab_multi(
+  vivas_g1_viol_sex, proc[proc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(proc,by="categoria",all.x=T) |> 
+  select(ds_tp_proc,n) |> 
+  mutate(porcentagem = round(n/vivas_g1_viol_sex_num*100,1)) |>
+  rename("Tipo de procedimento"=ds_tp_proc) |> 
+  arrange(-n)
+
+tab_proc <- bind_rows(
+  filter(tab_proc,!`Tipo de procedimento`=="Total")
+) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+# Printadno tabela organizada
+g1v_proc <- 
+  tabela_bonita(
+    tab_proc,
+    "Tabela de frequência e proporção de registros de Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência por Tipos de procedimentos que sofreram violência sexual, Rio Grande do Norte (2019-2021)"
+  )# |> 
+  #tab_footnote("")
+
+# por raça/cor
+g1v_proc_raca <- tab_cat_sinan(vivas_g1_viol_sex, proc, "ds_raca") |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1v_proc_raca <- 
+  tabela_bonita(
+    g1v_proc_raca,
+    "Tipo de procedimento por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# prop
+# por raça/cor
+g1v_proc_raca_p <- tab_cat_sinan(vivas_g1_viol_sex, proc, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1v_proc_raca_p <- 
+  tabela_bonita(
+    g1v_proc_raca_p,
+    "Proporção por tipo de procedimento por raça/cor de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# Num
+# por idade
+g1v_proc_idade <- tab_cat_sinan(vivas_g1_viol_sex, proc, "faixa_etaria_padrao") |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1v_proc_idade <- 
+  tabela_bonita(
+    g1v_proc_idade,
+    "Tipo de procedimento por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# proporção
+# por idade
+g1v_proc_idade_p <- tab_cat_sinan(vivas_g1_viol_sex, proc, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1v_proc_idade_p <- 
+  tabela_bonita(
+    g1v_proc_idade_p,
+    "Proporção por tipo de procedimento por faixa etária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Ao preencher uma ficha no SINAN (Sistema de Informação de Agravos de Notificação) no contexto de violências, é importante observar que uma mesma mulher pode ter passado por mais de um tipo de procedimento. A tabela a seguir apresenta o número absoluto de procedimentos realizados por mulheres que foram notificadas no SINAN decorrentes de violência sexual, e que não procuraram a polícia.
+
+Neste grupo de mulheres, os procedimentos mais frequentemente registrados incluem:
+
+1 - Coleta de Sangue: Cerca de 41% das mulheres submetidas a procedimentos passaram por coleta de sangue, o que é um indicativo relevante para avaliar a ocorrência de lesões físicas ou a necessidade de exames complementares.
+
+2 - Testes para Infecções Sexualmente Transmissíveis: Aproximadamente 30.9% das mulheres realizaram testes para Infecções Sexualmente Transmissíveis (ISTs), evidenciando a preocupação com a saúde sexual e a prevenção de possíveis infecções decorrentes da violência.
+
+3 - Teste de HIV: Cerca de 26.6% das mulheres submetidas a procedimentos fizeram o teste de HIV, destacando a importância de verificar e prevenir a possível transmissão do vírus em casos de violência.
+
+Também é relevante mencionar que 32 mulheres (3.6%) realizou aborto previsto em lei.
+
+<p>
+`r g1v_proc`<br>
+`r g1v_proc_raca`<br>
+`r g1v_proc_raca_p`<br>
+`r g1v_proc_idade`<br>
+`r g1v_proc_idade_p`<br>
+</p>
+
+#### 1.5 Pareamento com SIH
+
+```{r, include=FALSE}
+# porcentagem = numero que está no SIH/total de mulheres grupo 1
+pct_sih <- round(g1v_sinan_sih/g1v_distintos*100,1)
+
+```
+
+Deste grupo, `r g1v_sinan_sih` (`r pct_sih`%) possuem registro de internação no SIH.
+
+```{r, include=FALSE}
+# REMOVIDO POR NÃO TER RETORNADO MULHERES
+
+##### i. Filtro por Diagnóstico Secundário relacionado a violência:
+
+#filtro de mulheres com diagnóstico secundário de violência
+g1v_violencia <-
+  vivas_g1 |>
+  filter(fl_diag_sex_agressao == 1,
+         FL_SIH == 1)
+
+
+# Adicionando a categoria da tabela icd_map_res
+g1v_internacoes_cat <- vivas_g1 %>%
+  filter(banco == 'SIH') %>%
+  rename(ICD_10 = cd_diag_pri) %>%
+  left_join(icd_map_res, by = "ICD_10")
+
+# Se você quiser realizar a função tab_1() no resultado
+g1v_internacoes_cat <- 
+  tab_1(
+    g1v_internacoes_cat, 
+    causa_resumida
+  ) |> 
+  rename(
+    "Causa resumida" = causa_resumida,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+
+g1v_internacoes_cat<-
+  tabela_bonita(
+    g1v_internacoes_cat,
+    "Tabela de frequência dos registros por CID-10 como Motivo de Internação primária de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# internações por categoria
+g1m_internacoes_cat_a<-
+  vivas_g1 %>%
+  filter(banco == "SIH" & !is.na(cd_diag_sec_1)) %>%
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco, 
+    cd_diag_sec_1
+  ) |> 
+  rename(ICD_10 = cd_diag_sec_1) |> 
+  left_join(icd_map_res, by = "ICD_10")
+
+
+g1m_internacoes_cat_a<-
+  g1m_internacoes_cat_a |> 
+  filter(
+    !is.na(causa_resumida)
+  )
+
+
+g1m_internacoes_sec_cat<- 
+  tab_1(
+    g1m_internacoes_cat_a, 
+    causa_resumida
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    "n" = contagem,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+
+g1m_internacoes_sec_cat <-
+  tabela_bonita(
+    g1m_internacoes_sec_cat,
+    "Tabela de registros de Diagnósticos Secundários de hospitalizaçã ode mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  ) 
+
+
+```
+
+
+
+```{r, include=FALSE}
+# média da variavel dias_int
+g1v_mean_dias_int <- 
+  round(
+    mean(
+      na.omit(g1v_violencia$dias_int)
+    ),
+    1
+  )
+
+g1v_violencia$dias_int <- as.integer(g1v_violencia$dias_int)
+summary(g1v_violencia$dias_int)
+
+g1v_n_int<-
+  g1v_violencia |> 
+  filter(!is.na(dias_int)) %>%
+  nrow()
+
+# número maximo de dias de internação
+g1v_max_dias_int<-
+  g1v_violencia |> 
+  filter(!is.na(dias_int)) |> 
+  summarise(max_dias_int = max(dias_int))
+
+
+```
+
+Também foi calculado o tempo médio de internação das mulheres registradas no SIH. Para a análise dos diagnósticos de internação, foi utilizada a classificação do diagnóstico secundário por ter melhor preenchimento na base. Foram detectados `r g1v_n_int` registros de mulheres com diagnóstico secundário relacionado à violência. A partir destes registros, identifica-se que o tempo médio de internação para estes casos é de `r g1v_mean_dias_int`, sendo `r g1v_max_dias_int` o número máximo de dias.   
+
+`r g1v_internacoes_cat`
+
+`r g1m_internacoes_sec_cat`
+
+```{r, include=FALSE}
+
+# selecionando as colunas de notificação no SINAN
+g1v_dt_notif_sinan<-
+  g1v_violencia|> 
+  select(
+    par_f,
+    banco,
+    dt_ocor,
+    dt_notific
+  ) |> 
+  filter(banco == 'SINAN')
+
+```
+
+```{r, include=FALSE}
+
+# selecionando variavies de data de internaçao
+g1v_dt_internacao<-
+  g1v_violencia|> 
+  select(
+    par_f,
+    banco,
+    dt_internacao
+  ) |> 
+  filter(banco == 'SIH')
+
+
+```
+
+```{r, include=FALSE}
+# Diferença entre as datas
+g1v_sinan_hospital <- 
+  inner_join(
+    g1v_dt_notif_sinan, 
+    g1v_dt_internacao, 
+    by = "par_f"
+  ) |> 
+  mutate(
+    tempo_not_sih = dt_notific - dt_internacao,
+    tempo_ocor_sih = dt_ocor - dt_internacao,
+    tempo_not_sih1 = as.numeric(tempo_not_sih),
+    tempo_ocor_sih1 = as.numeric(tempo_ocor_sih)
+  )
+```
+
+```{r, include=FALSE}
+########
+### TEMPO ENTRE HOSPITALIZAÇÃO E NOTIFICAÇÃO
+########
+
+# resumo da diferença entre notificação e hospitalização, todos os valores
+mean_g1v_sinan_hospital_not <- 
+  summary_days(
+    g1v_sinan_hospital,
+    tempo_not_sih1
+  )
+
+########
+### Apenas valores positivos
+########
+mean_g1v_sinan_hospital_not_positivo <-
+  g1v_sinan_hospital |> 
+  distinct() |> 
+  filter(
+    tempo_not_sih1 >= 0,
+    tempo_not_sih1 < 31
+  )
+
+mean_g1v_sinan_hospital_not_positivo<-
+  summary_days(
+    mean_g1v_sinan_hospital_not_positivo,
+    tempo_not_sih1
+  )
+
+
+# Join entre as tabelas
+result_not <-
+  mean_g1v_sinan_hospital_not %>%
+  left_join(
+    mean_g1v_sinan_hospital_not_positivo,
+    by = "Medida resumo"
+  ) |> 
+  rename(
+    "Todo o período" = Valores.x,
+    "Período de um mês" = Valores.y
+  )
+
+
+# Printando tabela
+result_not <-
+  tabela_bonita(
+    result_not,
+    "Medidas resumo do tempo entre notificação de violência e a hospitalização de Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019 - 2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+#######
+### TEMPO ENTRE HOSPITALIZAÇÃO E OCORRÊNCIA
+#######
+
+# resumo da diferença entre data de ocorrência e hospitalização, todos os valores
+summary_g1v_sinan_hospital_ocor<-
+  g1v_sinan_hospital |> 
+  filter(!is.na(tempo_ocor_sih1))
+
+# Função para gerar a tabela
+summary_g1v_sinan_hospital_ocor<- ## 2 valores são NA
+  summary_days(
+    summary_g1v_sinan_hospital_ocor,
+    tempo_ocor_sih1
+  )
+
+
+# resumo da diferença entre data de ocorrência e hospitalização, APENAS POSITIVOS
+
+# filtrando datas maiores ou iguais a 0
+summary_g1v_sinan_hospital_ocor_positivo<-
+  g1v_sinan_hospital |> 
+  distinct() |> 
+  filter(
+    tempo_ocor_sih1 >= 0,
+    tempo_ocor_sih1 < 31
+  )
+
+# Função para gerar a tabela
+summary_g1v_sinan_hospital_ocor_positivo <-
+  summary_days(
+    summary_g1v_sinan_hospital_ocor_positivo,
+    tempo_ocor_sih1
+  )
+
+
+# join das tabelas trabalhadas
+result_ocor <-
+  summary_g1v_sinan_hospital_ocor %>%
+  left_join(
+    summary_g1v_sinan_hospital_ocor_positivo,
+    by = "Medida resumo"
+  )|> 
+  rename(
+    "Todo o período" = Valores.x,
+    "Período de um mês" = Valores.y
+  )
+
+
+# Printando a tabela
+result_ocor <- 
+  tabela_bonita(
+    result_ocor,
+    "Medidas resumo do tempo entre data da ocorrência da violência e a hospitalização de mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019 - 2021)"
+  )
+
+```
+
+\
+No processo de cálculo das medidas resumo, foram realizadas análises dos intervalos de dias entre a notificação e a hospitalização, bem como entre o dia da ocorrência da violência e o da hospitalização. Durante essa análise, foi observado intervalos com valores negativos e outros com valores muito elevados. Para compreender esse comportamento, consideraram-se várias hipóteses, incluindo:
+
+1 - Valores muito altos podem ser devidos a múltiplas notificações da mesma mulher, representando eventos distintos. Isso sugere a possibilidade de que a mesma pessoa tenha sido vítima de violência em várias ocasiões, resultando em intervalos longos entre a notificação e a hospitalização;
+
+2 - Valores negativos podem surgir devido à data de preenchimento da ficha, que pode levar em consideração um dia de referência, como o dia da notificação, e não necessariamente o dia exato da ocorrência da violência, de acordo com o campo de preenchimento da ficha;
+
+3 - Uma terceira hipótese que pode ser considerada é a possível ocorrência de erros no registro de datas, seja no momento da notificação, preenchimento da ficha ou inserção de dados no sistema. Esses erros podem resultar em intervalos de dias inconsistentes e não representativos das situações reais;
+
+4 - A quarta e talvez mais importante: a diferença negativa entre a notificação e a hospitalização ocorre quando há hospitalização antes de identificar que a causa estava relacionada a um caso de violência.
+
+Essas hipóteses ajudam a contextualizar os valores incomuns nos intervalos de dias e ressaltam a importância de uma análise mais aprofundada para identificar a causa raiz dessas discrepâncias. Por esse motivo, foi feito o comparativo entre as estatísticas descritivas sem filtragem e após a filtragem para o intervalo de 30 dias\
+
+`r result_not`
+
+A diferença observada entre as observações apresenta implicações significativas. Essa análise refinada nos conduz a uma média de 3.8 dias no intervalo entre a notificação de casos de violência e o subsequente registro no SIH (Sistema de Informações Hospitalares). É igualmente relevante destacar que, no contexto desses dados.
+
+Além de analisar a diferença entre o dia da notificação e o dia da hospitalização, é igualmente relevante observar a diferença entre o dia da ocorrência da violência e o dia da hospitalização. Nesse contexto, ao examinar os registros de 64 mulheres com ambas as datas disponíveis, destacou-se um dado significativo: 94,9% (37 mulheres) delas foram internadas no mesmo dia da ocorrência da violência, com a consideração de intervalos de até 30 dias
+
+`r result_ocor`
+
+\pagebreak
+
+### 2. Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN
+
+```{r, include=FALSE}
+
+## Filtragem pela variável `banco` da resultado diferente do filtro por banco == 'SESAP'
+# mulheres vivas que estão no SESED e no SIH
+
+g2v_sesed_sih <- 
+  vivas_g2 |> 
+  filter(banco == 'SIH') |> 
+  select(
+    par_f, 
+    banco, 
+    ds_raca, 
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+
+
+vivas_g2 |> 
+  select(
+    par_f,
+    FL_SESAP
+  ) |> 
+  distinct() |> 
+  summarise(sum(FL_SESAP))
+
+```
+
+```{r, include=FALSE}
+
+# mulheres vivas que estão apenas no SESED
+g2v_sesed <- 
+  vivas_g2 |> 
+  filter(
+    banco == 'SESAP'
+  ) |> 
+  select(
+    par_f, 
+    banco, 
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()  - g2v_sesed_sih
+
+
+
+vivas_g2 |> 
+  filter(
+    banco == 'SESAP'
+  ) |> 
+  select(
+    par_f, 
+    banco, 
+    ds_raca,
+    #faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()  - g2v_sesed_sih
+
+```
+
+```{r, include=FALSE}
+
+g2v_banco_dados<-
+  data.frame(
+    banco = c(
+      "SESED e SIH",
+      "Exclusivo SESED"),
+    n = c(
+      g2v_sesed_sih,
+      g2v_sesed
+    )
+  ) |> 
+  mutate(porcentagem = round(n/sum(n)*100,1)) |> 
+  arrange(-n) |> 
+  adorn_totals('row')
+
+g2v_banco_dados<-
+  g2v_banco_dados |> 
+  rename(
+    "Banco de dados" = banco,
+    "%" = porcentagem
+  ) 
+
+# Tabela com as mulheres do g2 vivas
+g2v_freq_banco <- 
+  tabela_bonita(g2v_banco_dados, "Distribuição de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN por banco de dados, Rio Grande do Norte (2019-2021)"
+  )
+
+
+```
+
+```{r, include=FALSE}
+
+# Mulheres únicas distintas
+g2v_distintos <- 
+  vivas_g2 |>
+  select(
+    par_f, 
+    banco, 
+    ds_raca,
+    faixa_etaria_padrao
+  ) |>
+  distinct()
+
+# numero de mulheres distintas no grupo2
+g2v_num_dist <- 
+  g2v_distintos |>
+  select(-banco) |>
+  distinct() |>
+  nrow()
+
+```
+
+Este grupo é composto por  mulheres que apareceram exclusivamente na base da Segurança Pública (SESED) e que podem ou não estar no SIH. Estas mulheres não têm notificação de violência no SINAN. Após o filtro para mulheres do grupo 2, foram identificados `r vivas_g2 |> nrow()` registros entre SIH e SESED, desses, `r g2v_num_dist` são mulheres distintas, com a seguinte distribuição:
+
+`r g2v_freq_banco`
+
+Nota-se que, para este grupo, há uma proporção muito menor de mulheres com registro de internação no SIH, apenas 0,1%, comparado a 6.7% do grupo 1.
+
+#### 2.1 Perfil das vítimas
+
+```{r, include=FALSE}
+
+# Faixa-etária por banco, mulheres do grupo 2
+g2v_fx_banco <- 
+  tabela_bonita(
+    tab_2(
+      g2v_distintos %>% 
+        select(-banco) %>%
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g2v_fx_banco_prop <- 
+  tabela_bonita(
+    vivas_g2 %>% 
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de raça/cor por faixa etária de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("")
+
+```
+
+```{r, include = FALSE}
+# Tabela de faixa-etária para o grupo 1
+g2v_fx_banco_prop_col <- 
+  tabela_bonita(
+    vivas_g2 %>% 
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de faixa etária por raça/cor de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("*")
+```
+
+
+```{r, include = FALSE}
+# Idade
+g2v_idade <- 
+  tab_1(
+    g2v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g2v_idade<-
+  tabela_bonita(
+    g2v_idade,
+    "Faixa etária de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g2v_raca <- 
+  tab_1(
+    g2v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g2v_raca<-
+  tabela_bonita(
+    g2v_raca,
+    "Raça/cor de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+Continuando a mesma tendência observada no grupo anterior, é notável que as mulheres pardas na faixa etária de 30 a 59 anos predominam, representando aproximadamente 50%. O segundo grupo mais numeroso consiste em mulheres brancas na mesma faixa etária.
+
+É interessante notar que as mulheres indígenas demonstram um aumento progressivo nas notificações ao longo das faixas etárias. Esse aumento se inicia com 7.7% na faixa de 0 a 9 anos e atinge um pico de 63.5% na faixa de 30 a 59 anos.
+
+<p>
+`r g2v_idade` <br>
+`r g2v_raca` 
+</p>
+
+#### 2.2 Caracterização da violência
+
+```{r, include=FALSE}
+
+g2_tpocor_tb <- 
+  tab_1(
+    vivas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2_tpocor <- 
+  tabela_bonita(
+    g2_tpocor_tb,
+    "Tabela de frequência proporção de Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência no Rio Grande do Norte (2019-2021)")
+
+```
+
+```{r, include=FALSE}
+
+g2_tpocor_tb_raca_n <- 
+  tab_2(
+    vivas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    ds_raca
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+
+
+# Tipo de ocorrência no SESED, grupo 2
+g2_tpocor_tb_raca_n <- 
+  tabela_bonita(
+    g2_tpocor_tb_raca_n,
+    "Registros de ocorrências por raça/cor de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência no Rio Grande do Norte (2019-2021)")
+
+```
+
+```{r, include=FALSE}
+
+g2_tpocor_tb_raca_pct <- 
+  tab_2(
+    vivas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    ds_raca,
+    pct=TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2_tpocor_tb_raca_pct <- 
+  tabela_bonita(
+    g2_tpocor_tb_raca_pct,
+    "Proporção de registros de ocorrências por raça/cor de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência no Rio Grande do Norte (2019-2021)")
+
+```
+
+```{r, include=FALSE}
+
+g2_tpocor_tb_idade_pct <- 
+  tab_2(
+    vivas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao,
+    pct=TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2_tpocor_tb_idade_pct <- 
+  tabela_bonita(
+    g2_tpocor_tb_idade_pct,
+    "Proporção de registros de ocorrências por faixa-etária de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência no Rio Grande do Norte (2019-2021)")
+
+g2_tpocor_tb_idade_n <- 
+  tab_2(
+    vivas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+
+```
+
+Quanto aos tipos de crime, foram selecionados apenas os Boletins de Ocorrência com crimes não letais para este grupo. É possível que a mesma mulher tenha feito registro de mais de um crime e, por isso, o total de crimes registrados ultrapassa a quantidade de mulheres identificadas para este grupo.
+
+O número de Boletins de Ocorrência por ameaça chegou a 45.1% no período de 2019 a 2021 para o grupo de mulheres que procuraram a segurança e não a saúde. O segundo tipo de ocorrência mais frequente foi a lesão corporal, com 28.9%. Estupro e estupro de vulnerável aparecem com 1.4% e 3.3% das ocorrências, respectivamente, conforme a tabela a seguir:
+
+`r g2_tpocor`
+<br>
+`r g2_tpocor_tb_raca_pct` <br>
+`r g2_tpocor_tb_idade_pct`
+
+
+#### 2.3 Pareamento com o SIH
+
+Apenas `r g2v_sesed_sih` mulheres com Boletim de Ocorrência não letal foram identificadas no SIH (aproximadamente 0,1%)
+
+```{r, include=FALSE}
+# REMOVIDO POR NÃO TER TIDO RETORNO
+
+##### i. Filtro por Diagnóstico Secundário relacionado a violência:
+
+# filtro de mulheres com diagnóstico secundário de violência
+# g2v_violencia <- 
+#   vivas_g2 %>% 
+#   filter(fl_diag_sex_agressao == 1)
+# 
+# g2v_violencia_num <- 
+#   g2v_violencia %>% 
+#   select(
+#     par_f,
+#     ds_raca,
+#     faixa_etaria_padrao
+#   ) %>% 
+#   distinct() %>% 
+#   nrow()
+
+#Não há registros
+```
+
+```{r, include=FALSE}
+
+# Adicionando a categoria da tabela icd_map_res
+g2v_internacoes_cat <- vivas_g2 %>%
+  filter(banco == 'SIH') %>%
+  rename(ICD_10 = cd_diag_pri) %>%
+  left_join(icd_map_res, by = "ICD_10")
+
+# Se você quiser realizar a função tab_1() no resultado
+g2v_internacoes_cat <- 
+  tab_1(
+    g2v_internacoes_cat, 
+    causa_resumida
+  ) |> 
+  rename(
+    "Causa resumida" = causa_resumida,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+
+g2v_internacoes_cat<-
+  tabela_bonita(
+    g2v_internacoes_cat,
+    "Tabela de frequência dos registros por CID-10 como Motivo de Internação primária de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# internações por categoria
+g2m_internacoes_cat_a<-
+  vivas_g2 %>%
+  filter(banco == "SIH" & !is.na(cd_diag_sec_1)) %>%
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco, 
+    cd_diag_sec_1
+  ) |> 
+  rename(ICD_10 = cd_diag_sec_1) |> 
+  left_join(icd_map_res, by = "ICD_10")
+
+
+g2m_internacoes_cat_a<-
+  g2m_internacoes_cat_a |> 
+  filter(
+    !is.na(causa_resumida)
+  )
+
+
+g2m_internacoes_sec_cat<- 
+  tab_1(
+    g2m_internacoes_cat_a, 
+    causa_resumida
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    "n" = contagem,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+
+g2m_internacoes_sec_cat <-
+  tabela_bonita(
+    g2m_internacoes_sec_cat,
+    "Tabela de registros de Diagnósticos Secundários de hospitalizaçã ode mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência, Rio Grande do Norte (2019-2021)"
+  ) 
+
+
+
+```
+
+`r g2v_internacoes_cat`<br>
+`r g2m_internacoes_sec_cat`
+
+
+\pagebreak
+
+### 3. Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN
+
+```{r, include=FALSE}
+
+# mulheres vivas que estão no SESED, SINAN e no SIH
+g3v_sesed_sinan_sih <-
+  vivas_g3 %>% 
+  filter(banco == 'SIH') %>% 
+  select(
+    par_f, 
+    ds_raca,
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  nrow()
+
+
+```
+
+```{r, include=FALSE}
+
+# mulheres vivas que estão tanto no SESED quanto no SINAN
+g3v_sesed_sinan <- 
+  vivas_g3 %>% 
+  distinct(
+    par_f, 
+    ds_raca, 
+    faixa_etaria_padrao
+  )  %>% 
+  nrow() - g3v_sesed_sinan_sih
+
+```
+
+```{r, include=FALSE}
+
+g3v_banco_dados <- 
+  data.frame(
+    banco = c("SESED, SINAN e SIH", "SESED e SINAN"),
+    n = c(
+      g3v_sesed_sinan_sih, 
+      g3v_sesed_sinan)
+  ) %>% 
+  mutate(porcentagem = round(n/sum(n)*100,2)) %>% 
+  arrange(-n) %>% 
+  adorn_totals('row')
+
+g3v_banco_dados<-
+  g3v_banco_dados |> 
+  rename(
+    "Banco de dados" = banco,
+    "%" = porcentagem
+  )
+
+# Tabela com todas
+g3v_freq_banco <- 
+  tabela_bonita(g3v_banco_dados, "Distribuição de Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte por banco de dados (2019-2021)")
+
+```
+
+```{r, include=FALSE}
+
+# numero de mulheres distintas no grupo 3
+g3v_distintos <- 
+  vivas_g3 %>% 
+  select(
+    par_f, 
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct()
+
+```
+
+```{r, include=FALSE}
+
+# Número total de mulheres distintas
+g3v_distintos_num <-
+  g3v_distintos%>% 
+  distinct() %>% 
+  nrow()
+
+
+```
+
+Este grupo é composto por mulheres que têm registro da violência  na saúde (SINAN) e na Segurança Pública (SESED), podendo estar ou não no SIH. Foram identificados `r vivas_g3 %>% nrow()` registros entre SINAN e SESE e, destes, `r g3v_distintos_num` são de mulheres distintas.
+`r g3v_freq_banco`
+
+#### 3.1 Perfil das vítimas
+
+
+```{r, include=FALSE}
+# Faixa-etária por banco, mulheres do grupo 2
+g3v_fx_banco <- 
+  tabela_bonita(
+    tab_2(
+      g3v_distintos |> 
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g3v_fx_banco_prop <- 
+  tabela_bonita(
+    vivas_g3 %>% 
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de raça/cor por faixa etária de mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )# |> 
+#tab_footnote("")
+
+```
+
+```{r, include = FALSE}
+# Tabela de faixa-etária para o grupo 1
+g3v_fx_banco_prop_col <- 
+  tabela_bonita(
+    vivas_g3 %>% 
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |>
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de por faixa etária por raça/cor de Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  ) #|> 
+#tab_footnote("")
+```
+
+```{r, include = FALSE}
+# Idade
+g3v_idade <- 
+  tab_1(
+    g3v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+# Printando tabela
+g3v_idade<-
+  tabela_bonita(
+    g3v_idade,
+    "Faixa etária de mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g3v_raca <- 
+  tab_1(
+    g3v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g3v_raca<-
+  tabela_bonita(
+    g3v_raca,
+    "Raça/cor de mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Esse grupo que é a intersecção entre mulheres com Boletim de Ocorrência e mulheres com registo no SINAN reforça ainda mais o grupo de mulheres pardas de 30 a 59 anos, este é o grupo que mais busca auxílio nos serviços públicos.
+
+<p>
+`r g3v_idade` <br>
+`r g3v_raca`
+</p>
+
+#### 3.2 Caracterização da violência
+
+```{r, include=FALSE}
+
+# VIOLENCIA NA SAÚDE
+tab_viols3 <- tab_multi(
+  vivas_g3, viol[viol$categoria != "Total", ]$categoria, 
+  'SINAN') %>% 
+  merge(viol,by="categoria",all.x=T) %>% 
+  select(ds_tp_viol,n) %>% 
+  mutate(`%` = round(n/g3v_distintos_num*100,1)) |> 
+  rename("Tipo de violência"=ds_tp_viol) %>% 
+  arrange(-n)
+
+tab_viols3 <- bind_rows(
+  filter(tab_viols3,!`Tipo de violência`=="Total")
+) 
+
+tab_viols3 <-
+  tab_viols3 |> 
+  filter(
+    n > 10
+  )
+
+g3v_viol <- 
+  tabela_bonita(
+    tab_viols3,
+    "Registros de Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN na perspectiva do SINAN, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* O denominador da porcentagem é o número de mulheres únicas. A Violência Financeira e a Negligência somam 10 registros (3.1%). Não há registros para Trabalho Infantil, Intervenção Legal e Tráfico De Humanos")
+
+```
+
+```{r, include=FALSE}
+
+# VIOLENCIA NA POLICIA
+
+g3_tpocor_tb <- 
+  tab_1(
+    vivas_g3 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g3_tpocor <- 
+  tabela_bonita(
+    g3_tpocor_tb,
+    "Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN na perspectiva do SESED no Rio Grande do Norte (2019-2021)")
+
+```
+
+```{r, include=FALSE}
+g3_tpocor_tb <- 
+  tab_2(
+    vivas_g3 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao,
+    pct = TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+```
+
+Pouco diferente dos grupos anteriores, o grupo de mulheres que buscam tanto a polícia quanto aparatos de saúde aparentam ser mulheres que sofreram abusos ainda mais danosos fisicamente, como 71.3% sofreram violência física e 19.7% sofreram violência sexual. Além disso, é importante ressaltar que 41.5% dessas mulheres também passaram por situações de violência psicológica.
+
+`r g3v_viol`
+
+Ao passarem pelo sistema de segurança, 49.5% das mulheres fizeram Boletins de Ocorrência por lesão corporal e 22.2% por ameaças.
+
+
+```{r, include = FALSE}
+tab_cat_sinan(vivas_g3, viol, 'faixa_etaria_padrao', pct_reg = TRUE)
+```
+
+
+`r g3_tpocor`
+
+#### 3.3 Encaminhamentos no SINAN
+
+```{r, include=FALSE}
+
+tab_enc3 <- tab_multi(
+  vivas_g3, enc[enc$categoria != "Total", ]$categoria, 
+  'SINAN') %>% 
+  merge(enc,by="categoria",all.x=T) %>% 
+  select(ds_tp_enc,n) %>% 
+  mutate(porcentagem = round(n/g3v_distintos_num*100,1)) |> 
+  rename("Tipo de encaminhamento"=ds_tp_enc) %>% 
+  arrange(-n)
+
+tab_enc3 <- bind_rows(
+  filter(tab_enc3,!`Tipo de encaminhamento`=="Total")
+)
+
+
+tab_enc3 <-
+  tab_enc3 |> 
+  filter(
+    n > 10
+  ) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+g3v_enc <- 
+  tabela_bonita(
+    tab_enc3,
+    "Tabela de frequência e proporção de encaminhamentos que têm Boletim de Ocorrência por violência e notificação de violência no SINAN por Tipos de encaminhamento, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* O denominador da porcentagem é o número de mulheres únicas.")
+
+```
+
+Para este grupo, os dados do SINAN indicam a prevalência de encaminhamentos para Delegacias, especializadas ou não. Isso indica que as mulheres provavelmente acessaram serviços de saúde primeiro e compareceram à Delegacia posteriormente.
+
+`r g3v_enc`
+
+```{r, include=FALSE}
+
+tab_cat_sinan(vivas_g3, enc, 'ds_raca', pct_reg=TRUE)
+
+
+```
+
+
+#### 3.4. Procedimentos no SINAN de pessoas que sofreram violência sexual
+
+```{r, include=FALSE}
+
+# # Certifique-se de que 'proc' é um data frame ou tibble
+# if (!is.data.frame(proc)) {
+#   stop("O objeto 'proc' não é um data frame ou tibble válido.")
+# }
+
+vivas_g3_viol_sex <-
+  vivas_g3 |> 
+  filter(
+    viol_sexu == 1
+  )
+
+# Registros de violência sexual
+g3v_viol_sexu_1 <- 
+  vivas_g3 |> 
+  select(
+    par_f,
+    viol_sexu
+  ) |> 
+  filter(viol_sexu == 1) |> 
+  nrow()
+
+# número de mulheres com violência sexual
+vivas_g3_viol_sex_num <-
+  vivas_g3_viol_sex |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique() |> 
+  nrow()
+
+# Continuar com o código
+tab_proc3 <- tab_multi(
+  vivas_g3_viol_sex, 
+  proc[proc$categoria != "Total", ]$categoria, 
+  'SINAN'
+) %>% 
+  merge(proc, by = "categoria", all.x = TRUE) %>% 
+  select(ds_tp_proc, n) %>% 
+  arrange(-n) |>
+  mutate(porcentagem = round(n/vivas_g3_viol_sex_num*100,1)) |>
+  filter(ds_tp_proc != 'Total') |> 
+  rename("Tipo de procedimento" = ds_tp_proc)
+
+tab_proc3 <- 
+  tab_proc3 |> 
+  filter(
+    n > 7
+  ) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+g3v_proc <- 
+  tabela_bonita(
+    tab_proc3,
+    "Tabela de frequência e proporção de registros de Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN por tipo de procedimento, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* O denominador da porcentagem é o número de mulheres únicas. Além disso, 
+               os tipos de procedimentos Coleta De Sêmen têm 1 registro (1.5%),
+               enquanto Aborto Previsto Em Lei não tem registro")
+```
+
+```{r, include=FALSE}
+
+tab_cat_sinan(vivas_g3_viol_sex, proc, 'faixa_etaria_padrao')
+
+```
+
+
+Foram identificados `r g3v_viol_sexu_1` registros de `r vivas_g3_viol_sex_num` mulheres que sofreram violência sexual. Baseado nesse recorte, foi calculada a frequência dos procedimentos feitos nessas mulheres.
+
+É possível notar que 68.6% das mulheres que sofreram violência sexual passaram por coleta de sangue, e mais de 58.0% fizeram teste de IST e HIV. Também é importante ressaltar que 37.1% dessas mulheres fizeram contracepção de emergência.
+
+`r g3v_proc`
+
+#### 3.5 Pareamento com SIH
+
+Entre as mulheres deste grupo, `r round(g3v_sesed_sinan_sih/g3v_distintos_num*100,2)`% foram identificadas no SIH, que correspondem a `r g3v_sesed_sinan_sih` mulheres. Por se tratar de um n pequeno, nenhuma análise adicional foi realizada.
+
+```{r, include=FALSE}
+
+##### i. Filtro por Diagnóstico Secundário relacionado a violência:
+##########
+## CONFIRMAR SE É ESSA COLUNA OU A OUTRA FLAG
+#########
+
+# filtrando para mulheres com violencia == 1
+vivas_g3_viol <- 
+  vivas_g3 %>% 
+  filter(
+    fl_diag_sex_agressao == 1,
+    # banco == 'SIH'
+  )
+
+```
+
+```{r, include=FALSE}
+
+# REMOVIDO POR FALTA DE DADO
+###### 1. Procedimentos
+#Tabela de procedimentos:
+
+#`r proc_3_viol`
+
+# REMOVER
+
+g3v_vivas_viol_n <-
+  vivas_g3_viol |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow()
+
+# tab_proc_3_viol <- tab_multi(
+#   vivas_g3_viol, proc[proc$categoria != "Total", ]$categoria, 
+#   'SINAN') %>% 
+#   merge(proc,by="categoria",all.x=T) %>% 
+#   select(ds_tp_proc,n) %>% 
+#   mutate(porcentagem = round(n/g3v_vivas_viol_n*100,1)) |> 
+#   rename("Tipo de procedimento"=ds_tp_proc) %>% 
+#   arrange(-n)
+# 
+# tab_proc_3_viol <- bind_rows(
+#   filter(tab_proc_3_viol,!`Tipo de procedimento`=="Total")
+# ) 
+# 
+# proc_3_viol <- 
+#   tabela_bonita(
+#     tab_proc_3_viol,
+#     "Tabela de frequência e proporção de procedimentos em Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN com diagnóstico secundário relacionado a violência, Rio Grande do Norte (2019-2021)"
+#     )
+
+```
+
+```{r, include=FALSE}
+
+# ###### 2. Tempos médios de internação
+# mean_int_g3v <-
+#   vivas_g3_viol %>% 
+#   summarise(
+#     mean(
+#       dias_int,
+#       na.rm = TRUE)
+#   )
+# 
+# Média de dias internadas:
+# 
+# `r mean_int_g3v`
+
+```
+
+```{r, include=FALSE}
+# REMOVIDO POR FALTA DE DADOS
+
+###### 3. Dias entre o SINAN e a internação
+
+# # selecionando as colunas de notificação no SINAN
+g3v_dt_notif_sinan<-
+  vivas_g3_viol%>%
+  select(
+    par_f,
+    banco,
+    dt_ocor,
+    dt_notific
+  ) %>%
+  filter(banco == 'SINAN')
+
+```
+
+```{r, include=FALSE}
+
+# selecionando variavies de data de internaçao
+g3v_dt_internacao<-
+  vivas_g3_viol%>% 
+  select(
+    par_f,
+    banco,
+    dt_internacao
+  ) %>% 
+  filter(banco == 'SIH')
+
+
+```
+
+```{r, include=FALSE}
+
+# REMOVIDO POR FALTA DE DADOS
+# há um único registro com valor negativo de -3
+# 
+# # Diferença entre as datas
+g3v_sinan_hospital <-
+  inner_join(
+    g3v_dt_notif_sinan,
+    g3v_dt_internacao,
+    by = "par_f"
+  ) %>%
+  mutate(
+    tempo_not_sih = dt_notific - dt_internacao,
+    tempo_ocor_sih = dt_ocor - dt_internacao,
+    tempo_not_sih1 = as.numeric(tempo_not_sih),
+    tempo_ocor_sih1 = as.numeric(tempo_ocor_sih)
+  )
+
+```
+
+```{r, include=FALSE}
+
+#tabela com a mulhere e diferença de dias 
+g3vsinan_to_sih<-
+  vivas_g3_viol %>% 
+  select(par_f,
+         banco,
+         dt_notific,
+         dt_internacao,
+         dias_int
+  ) %>% 
+  mutate(sinan_to_sih = as.numeric(difftime(dt_internacao[1], dt_notific[3],  units = "days")))
+
+# a diferença é, em média `r mean(g3vsinan_to_sih$sinan_to_sih)`
+
+```
+
+\pagebreak
+
+#### Comparação entre os grupos de mulheres vivas 1, 2 e 3:
+
+Comparar as características das mulheres que compõem esses três grupos diferentes é importante para entender o que diferencia mulheres que forma atendidas pela saúde, pela segurança e pelos dois serviços.  Para isso, comparamos faixas etárias e raça/cor entre as mulheres dos diferentes grupos.
+
+Para facilitar a leitura, as colunas das tabelas contêm informações sobre a frequência e a porcentagem de faixa etária e raça/cor entre os grupos 1, 2 e 3, sendo:
+
+Grupo 1: Mulheres com notificação de violência no SINAN, mas sem Boletim de Ocorrência;
+
+Grupo 2: Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN;
+
+Grupo 3: Mulheres que têm Boletim de Ocorrência por violência e notificação de violência no SINAN;
+
+##### Comparação entre as faixas etárias
+
+```{r, include=FALSE}
+# idade grupo 1 vivas
+g1v_comparacao_idade <- 
+  vivas_g1 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        faixa_etaria_padrao
+  ) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Grupo 1 (n)" = contagem,
+    "Grupo 1 (%)" = `%`
+  )
+```
+
+```{r, include=FALSE}
+# idade grupo 2 vivas
+g2v_comparacao_idade <- 
+  vivas_g2 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        faixa_etaria_padrao
+  ) |> 
+  arrange(faixa_etaria_padrao)|> 
+  rename(
+    "Grupo 2 (n)" = contagem,
+    "Grupo 2 (%)" = `%`
+  )
+```
+
+```{r, include=FALSE}
+# idade grupo 3 vivas
+g3v_comparacao_idade <- 
+  vivas_g3 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        faixa_etaria_padrao
+  ) |> 
+  arrange(faixa_etaria_padrao)|> 
+  rename(
+    "Grupo 3 (n)" = contagem,
+    "Grupo 3 (%)" = `%`
+  )
+
+```
+
+```{r, include=FALSE}
+# juntando as tabelas
+g1_g2_comp_idade <- 
+  left_join(
+    g1v_comparacao_idade, 
+    g2v_comparacao_idade, 
+    by = "faixa_etaria_padrao"
+  )
+
+# Realize o join da tabela resultante com a tabela g3v_comparacao_idade pela coluna faixa_etaria_padrao
+tabela_comparacao_idade <- 
+  left_join(
+    g1_g2_comp_idade,
+    g3v_comparacao_idade,
+    by = "faixa_etaria_padrao"
+  )|> 
+  rename(
+    "Faixa Etária" = faixa_etaria_padrao
+  ) |> 
+  as.data.frame()
+
+```
+
+```{r, include=FALSE}
+# Tabela final para comparar as idades dos grupos 1, 2 e 3 de mulheres vivas
+comparacao_idade_vivas <-
+  tabela_bonita(
+    tabela_comparacao_idade,
+    "Tabela de comparação das Faixas Etárias das Mulheres Vivas que compõem os grupos 1, 2 e 3, respectivamente, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+`r comparacao_idade_vivas`
+
+-   Adicionar análise por faixa etária mais prevalente (30 a 59 anos) e destacar grupo 2 por ter + de 56% concentrado em uma única faixa etária. Destacar também 20% de meninas entre 10 e 19 anos no Grupo 3 em comparação a 9,7% no grupo 2.
+
+##### Comparação entre Raça/cor
+
+```{r, include=FALSE}
+# idade grupo 1 vivas
+g1v_comparacao_raca <- 
+  vivas_g1 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    ds_raca
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        ds_raca
+  ) |> 
+  arrange(ds_raca) |> 
+  rename(
+    "Grupo 1 (n)" = contagem,
+    "Grupo 1 (%)" = `%`
+  )
+
+```
+
+```{r, include=FALSE}
+
+# idade grupo 2 vivas
+g2v_comparacao_raca <- 
+  vivas_g2 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        ds_raca
+  ) |> 
+  arrange(ds_raca)|> 
+  rename(
+    "Grupo 2 (n)" = contagem,
+    "Grupo 2 (%)" = `%`
+  )
+
+df_fem |> 
+  filter(banco == "SESAP") |> 
+  # distinct() |> 
+  nrow()
+
+```
+
+```{r, include=FALSE}
+
+# idade grupo 3 vivas
+g3v_comparacao_raca <- 
+  vivas_g3 %>% 
+  select(
+    par_f,
+    ds_raca, 
+    faixa_etaria_padrao
+  ) %>% 
+  distinct() %>% 
+  tab_1(., 
+        ds_raca
+  ) |> 
+  arrange(ds_raca)|> 
+  rename(
+    "Grupo 3 (n)" = contagem,
+    "Grupo 3 (%)" = `%`
+  )
+
+```
+
+```{r, include=FALSE}
+
+# juntando as tabelas
+g1_g2_comp_idade <- left_join(g1v_comparacao_raca, g2v_comparacao_raca, by = "ds_raca")
+
+# Realize o join da tabela resultante com a tabela g3v_comparacao_raca pela coluna ds_raca
+tabela_comparacao_raca <- left_join(g1_g2_comp_idade, g3v_comparacao_raca, by = "ds_raca")
+
+```
+
+```{r, include=FALSE}
+
+# Tabela final para comparar as idades dos grupos 1, 2 e 3 de mulheres vivas
+comparacao_raca_vivas <-
+  tabela_bonita(
+    tabela_comparacao_raca |> 
+      #  arrange(-`Grupo 1 (n)`)|>
+      rename(
+        "Raça/cor" = ds_raca
+      ) |> 
+      as.data.frame(),
+    "Tabela de comparação de Raça/cor das Mulheres Vivas que compõem os grupos 1, 2 e 3, respectivamente, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+`r comparacao_raca_vivas`
+
+A predominância de raça/cor em todos os grupos comparados é a parda, seguida de branca e ignorada. A única exceção é o grupo 3, que a terceira maior proporção é de mulheres da raça/cor preta. O alto volume de dados de raça/cor ignorada vem, principalmente, pelo mal preenchimento deste campo no SIH.
+
+\pagebreak
+
+### 4. Mulheres com notificação de violência sexual no SINAN
+
+```{r, include=FALSE}
+
+# mulheres vivas diferentes no grupo 4 vivas
+g4v_dif <-  
+  vivas_g4 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    # banco
+  ) %>% 
+  distinct()
+
+# Número de mulheres vivas diferentes no grupo 4 vivas
+g4v_dist <-
+  g4v_dif%>% 
+  nrow()
+
+g4v_registro_banco <-
+  tab_1(vivas_g4, banco) |> 
+  tabela_bonita(
+    
+    "Distribuição dos registros de mulheres com notificação de violência sexual no SINAN por banco dedados, Rio Grande do Norte (2019 - 2021)"
+  )
+
+```
+
+As mulheres que têm notificação de violência sexual no SINAN e não têm registro de óbito correspondem a `r vivas_g4 |> nrow()` registros nas bases, sendo estes de `r g4v_dist` mulheres distintas.
+
+Os registros deste grupo seguem a seguinte distribuição:
+
+`r g4v_registro_banco`
+
+#### 4.1 Perfil das vítimas
+
+```{r, include=FALSE}
+
+g4v_distintos <-
+  vivas_g4 |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct()
+
+# Faixa-etária por banco, mulheres do grupo 2
+g4v_fx_banco <- 
+  tabela_bonita(
+    tab_2(
+      g4v_distintos %>% 
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres com notificação de violência sexual no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g4v_fx_banco_prop <- 
+  tabela_bonita(
+    vivas_g4  |>  
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de raça/cor por faixa etária de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("* ")
+
+```
+
+```{r, include = FALSE}
+# Tabela de faixa-etária para o grupo 1
+g4v_fx_banco_prop_col <- 
+  tabela_bonita(
+    vivas_g4 %>% 
+      select(
+        par_f, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      )
+    ,
+    "Tabela de proporção de faixa etária por raça/cor de mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE)
+# ) |> 
+# tab_footnote("*")
+```
+
+```{r, include = FALSE}
+# Idade
+g4v_idade <- 
+  tab_1(
+    g4v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g4v_idade<-
+  tabela_bonita(
+    g4v_idade,
+    "Faixa etária de mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g4v_raca <- 
+  tab_1(
+    g4v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g4v_raca<-
+  tabela_bonita(
+    g4v_raca,
+    "Raça/cor de Mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+Este grupo é composto por mulheres que foram vítimas de violência sexual, apresentando características distintas em comparação aos grupos anteriores. São mais jovens, a maioria está na faixa etária de 10 a 19 anos, com uma predominância significativa de mulheres de raça/cor parda.
+
+<p>
+`r g4v_idade` <br>
+`r g4v_raca` 
+</p>
+
+
+#### 4.2 Caracterização de internações hospitalares
+
+```{r, include=FALSE}
+
+# Adicionando a categoria da tabela icd_map_res
+g4v_internacoes_cat <- vivas_g4 %>%
+  filter(banco == 'SIH') %>%
+  rename(ICD_10 = cd_diag_pri) %>%
+  left_join(icd_map_res, by = "ICD_10")
+
+# Se você quiser realizar a função tab_1() no resultado
+g4v_internacoes_cat <- 
+  tab_1(
+    g4v_internacoes_cat, 
+    causa_resumida
+  ) |> 
+  rename(
+    "Causa resumida" = causa_resumida,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+# tabela de diagnosticos primários g4 vivas
+g4v_internacoes <- 
+  tabela_bonita(
+    g4v_internacoes_cat ,
+    "Tabela de frequência e porcentagem dos registros por CID-10 como Motivo de Internação de mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Destas mulheres com notificação de violência, 18 têm registro de internação no SIH. A principal causa de internação está relacionada à gravidez e parto, especificamente o código da CID-10 O800 - Parto espontâneo. As causas e suas frequências estão listadas na tabela abaixo:
+
+`r g4v_internacoes`
+
+#### 4.3 Pareamento com Segurança Pública
+
+```{r, include=FALSE}
+
+# Número de mulheres com BO
+g4v_mulh_bo <- 
+  vivas_g4 %>% 
+  filter(banco == 'SESAP') %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao) %>% 
+  distinct() %>% 
+  nrow()
+
+```
+
+```{r, include=FALSE}
+# número de registros de BO
+g4v_regist_bo <- vivas_g4 %>% 
+  filter(banco == 'SESAP') %>% 
+  select(par_f) %>% 
+  nrow()
+```
+
+```{r, include=FALSE}
+
+# Proporção de mulheres no SESED em relação ao total
+g4v_mulh_bo_p <- round(g4v_mulh_bo/g4v_dist*100,1)
+
+# proporção de registros no SESED em relação ao total
+g4v_regist_bo_p <- round(g4v_regist_bo/ vivas_g4%>% 
+                           select(par_f) %>% 
+                           nrow() *100,1)
+```
+
+Das `r g4v_dist` mulheres com notificação de violência sexual, `r g4v_mulh_bo` aparecem na base de dados da Segurança Pública. Isso significa que `r g4v_mulh_bo_p`% das mulheres deste grupo fizeram registro da ocorrência na polícia.
+
+
+```{r, include=FALSE}
+# tabela de crimes grupo 4 de mulheres vivas
+g4_tpocor_tb <- 
+  tab_1(
+    vivas_g4 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+
+# Tipo de ocorrência no SESED, grupo 2
+g4_tpocor <- 
+  tabela_bonita(
+    g4_tpocor_tb,
+    "Tabela de frequência e proporção de Mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)")
+
+# grupo que sofreu violência vs todos do SINAN
+
+```
+
+```{r, include=FALSE} 
+g4_tpocor_tb_raca_n <- 
+  tab_2(
+    vivas_g4 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    ds_raca
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g4_tpocor_tb_raca_n <- 
+  tabela_bonita(
+    g4_tpocor_tb_raca_n,
+    "Registros de ocorrências por raça/cor de mulheres com notificação de violência sexual no SINAN. Rio Grande do Norte (2019-2021)")
+```
+
+
+79% dos Boletins de Ocorrência de mulheres que notificaram casos de violência sexual no SINAN incluíram registros de estupro e/ou estupro de vulnerável.
+
+É possível notar que há diferença entre os perfis de mulheres com e sem casos de violência sexual notificados no SINAN. Os registros no boletim de ocorrência invertem nesses casos e es
+
+<p>
+`r g2_tpocor`<br>
+`r g4_tpocor_tb_raca_n`<br>
+
+`r g4_tpocor`<br>
+</p>
+
+```{r, include=FALSE}
+
+##### 4.3 Geolocalização (segunda rodada de análises)
+vivas_g4 |> 
+  filter(banco == "SINAN") |> 
+  mutate(local_ocor_label = case_when
+         (local_ocor == 1~"Residência",
+           local_ocor == 2~ "Habitação coletiva",
+           local_ocor == 3~ "Escola",
+           local_ocor == 4~ "Local de prática esportiva",
+           local_ocor == 5~ "Bar ou similar",
+           local_ocor == 6~ "Via pública",
+           local_ocor == 7~ "Comércio/Serviços",
+           local_ocor == 8 ~ "Industrias/ construção",
+           local_ocor == 9~ "Outro",
+           T~"Sem informação"
+         )) |> 
+  tab_1(local_ocor_label) |> 
+  rename(
+    "n" = contagem,
+    "Local da ocorrência" = local_ocor_label
+  ) 
+  
+
+```
+
+#### 4.4 Procedimentos no SINAN
+```{r, include=FALSE}
+
+# Mulheres que sofreram violencia sexual
+vivas_g4_viol_sex <- 
+  vivas_g4 |> 
+  filter( 
+    viol_sexu == 1
+  )
+
+# número único de mulheres que sofreram viol sexual
+vivas_g4_viol_sex_num = 
+  vivas_g4 |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique() |> 
+  nrow()
+
+# Gerando tabela multi
+tab_proc <- tab_multi(
+  vivas_g4, proc[proc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(proc,by="categoria",all.x=T) |> 
+  select(ds_tp_proc,n) |> 
+  mutate(porcentagem = round(n/vivas_g4_viol_sex_num*100,1)) |>
+  rename("Tipo de procedimento"=ds_tp_proc) |> 
+  arrange(-n)
+
+tab_proc_4v <- bind_rows(
+  filter(tab_proc,!`Tipo de procedimento`=="Total")
+) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+# Printadno tabela organizada
+g4v_proc <- 
+  tabela_bonita(
+    tab_proc_4v,
+    "Tabela de frequência e proporção de registros de Mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)")
+  # ) |> 
+  # tab_footnote("O denominador da porcentagem é 816, que representa o número de mulheres deste grupo que sofreram violência sexual.")
+
+
+```
+`r g4v_proc`
+
+#### 4.5 Encaminhamentos no SINAN
+
+```{r, include=FALSE}
+
+# mulheres distintas
+g4v_distintos <- num_group(vivas_g4)
+
+tab_enc_g4 <- tab_multi(
+  vivas_g4, enc[enc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(enc,by="categoria",all.x=T) |> 
+  select(ds_tp_enc,n) |> 
+  mutate(porcentagem = round(n/g4v_distintos*100,1)) |> 
+  rename("Tipo de encaminhamento"=ds_tp_enc) |> 
+  arrange(-n)
+
+tab_enc_g4 <- bind_rows(
+  filter(tab_enc_g4,!`Tipo de encaminhamento`=="Total")
+)
+
+tab_enc_g4 <- 
+  tab_enc_g4 |> 
+  # filter(
+  #   n > 100
+  # ) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+g4v_enc <- 
+  tabela_bonita(
+    tab_enc_g4,
+    "Tabela de frequência e proporção do tipo de encaminhamento de mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r g4v_enc`
+
+
+#### 4.6 Situação conjugal
+```{r, include = FALSE}
+
+g4v_sit_conj <- 
+  vivas_g4 %>%
+  filter(banco == "SINAN") |> 
+  mutate(
+    cd_sit_conj = ifelse(is.na(cd_sit_conj), 9, as.character(cd_sit_conj)),
+    cd_sit_conj = case_when(
+      cd_sit_conj == "1" ~ "Solteiro",
+      cd_sit_conj == "2" ~ "Casado/ União consensual",
+      cd_sit_conj == "3" ~ "Viúvo",
+      cd_sit_conj == "4" ~ "Separado",
+      cd_sit_conj == "8" ~ "Não se aplica",
+      cd_sit_conj == "9" ~ "Ignorado",
+      TRUE ~ as.character(cd_sit_conj)
+    )
+  ) |> 
+ # select(par_f, ds_raca, cd_sit_conj)  |> 
+  #distinct() %>%
+  tab_1(cd_sit_conj) |> 
+  rename(
+    "Situação conjugal" = cd_sit_conj
+  )
+  
+g4v_sit_conj <-
+  tabela_bonita(g4v_sit_conj, "Situação conjugal de mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019 - 2021)") |> 
+  tab_footnote("1080 é o número de registros de mulheres com o campo de situação conjugal preenchido")
+  
+```
+
+`r g4v_sit_conj`
+
+Segundo o dicionário do SINAN Violência, o campo é preenchido como "Não se aplica" sempre que a pessoa tiver idade menor ou igual a 9 anos.
+
+#### 4.7 Agressor
+```{r, include=FALSE}
+
+tab_rel_g4v <- tab_multi(
+  vivas_g4, rel[rel$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(rel,by="categoria",all.x=T) |> 
+  select(ds_tp_rel,n) |> 
+  mutate(porcentagem = round(n/g4v_distintos*100,1)) |> 
+  rename("Tipo de encaminhamento"=ds_tp_rel) |> 
+  arrange(-n)
+
+tab_rel_g4v <- bind_rows(
+  filter(tab_rel_g4v,!`Tipo de encaminhamento`=="Total")
+) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+tab_rel_g4v <- 
+  tabela_bonita(
+    tab_rel_g4v,
+    "Tipo de relacionamento com o agressor das mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019 - 2021)"
+    )
+
+
+```
+
+`r tab_rel_g4v`
+
+
+```{r, include=FALSE}
+g4_tpocor_tb_idade_n <- 
+  tab_2(
+    vivas_g4 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao,
+    pct=TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+  ) |> 
+  as.data.frame()
+```
+
+
+#### Procedimentos no SINAN
+
+```{r, include=FALSE}
+
+# Mulheres que sofreram violencia sexual
+vivas_g4_viol_sex <- 
+  vivas_g1 |> 
+  filter( 
+    viol_sexu == 1
+  )
+
+# número único de mulheres que sofreram viol sexual
+vivas_g1_viol_sex_num = 
+  vivas_g1_viol_sex |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique() |> 
+  nrow()
+
+# Gerando tabela multi
+tab_proc <- tab_multi(
+  vivas_g1_viol_sex, proc[proc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(proc,by="categoria",all.x=T) |> 
+  select(ds_tp_proc,n) |> 
+  mutate(porcentagem = round(n/vivas_g1_viol_sex_num*100,1)) |>
+  rename("Tipo de procedimento"=ds_tp_proc) |> 
+  arrange(-n)
+
+tab_proc <- bind_rows(
+  filter(tab_proc,!`Tipo de procedimento`=="Total")
+) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+
+```
+
+
+### 5. Mulheres com registro de internação no SIH, que apresentam diagnóstico secundário de autolesão ou agressão.
+
+```{r, include = FALSE}
+# Idade
+g5v_idade <- 
+  tab_1(
+    g5v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g5v_idade<-
+  tabela_bonita(
+    g5v_idade,
+    "Faixa etária de mulheres com registro de internação no SIH, que apresentam diagnóstico secundário de autolesão ou agressão, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g5v_raca <- 
+  tab_1(
+    g5v_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g5v_raca<-
+  tabela_bonita(
+    g5v_raca,
+    "Raça/cor de mulheres com registro de internação no SIH, que apresentam diagnóstico secundário de autolesão ou agressão, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+`r g5v_idade`<br
+`r g5v_raca`
+
+
+##### 5.1 Diagnósticos Secundários de Agressão e Autolesão no SIH
+
+```{r, include=FALSE}
+# Número de registros
+g5v_total_registros <-
+  vivas_g5 |> 
+  nrow()
+
+# Número total de mulheres distintas no grupo 5 de mulheres vivas 
+g5v_total <-
+  vivas_g5 %>% 
+  # filter(banco == 'SINAN') %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+  ) %>% 
+  distinct() %>% 
+  nrow()
+```
+
+```{r, include=FALSE}
+
+# internações por categoria
+g5m_internacoes_cat_a<-
+  vivas_g5 %>%
+  filter(banco == "SIH" & !is.na(cd_diag_sec_1)) %>%
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco, 
+    cd_diag_sec_1
+  ) |> 
+  rename(ICD_10 = cd_diag_sec_1) |> 
+  left_join(icd_map_res, by = "ICD_10")
+
+
+g5m_internacoes_cat<- 
+  tab_1(
+    g5m_internacoes_cat_a, 
+    causa_resumida
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    "n" = contagem,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+
+g5v_cid10 <-
+  tabela_bonita(
+    g5m_internacoes_cat,
+    "Tabela de registros de Diagnósticos Secundários de Agressão e Autolesão no SIH de Mulheres com notificação de violência sexual no SINAN, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* Existem 8 registros com NA, representando 8.2% do total")
+
+g5v_registro_banco <-
+  tab_1(vivas_g5, banco)
+
+```
+
+Para os grupos anteriores, usamos como referência os registros no SINAN e Segurança Pública. Para este grupo, inverte-se a lógica: buscamos mulheres com registro de internação por causas relacionadas à violência no SIH. A partir desta referência, buscamos identificar se estas mulheres tiveram essa violência registrada no SINAN e/ou SESED. Para este grupo, selecionamos apenas mulheres que estão vivas, ou seja, que não têm registro de óbito.
+
+As mulheres que compõe este grupo correspondem a `r g5v_total_registros` registros nas bases, sendo eles de `r g5v_total` mulheres distintas. Por outro lado, foram 84 registros com diagnóstico secundário de agressão e/ou lesões autoprovocadas voluntariamente, indicando que possivelmente há rehospitalização de mulheres por essas causas.
+
+`r g5v_cid10`
+
+```{r, include=FALSE}
+  tab_2(
+    g5m_internacoes_cat_a, 
+    causa_resumida,
+    faixa_etaria_padrao
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    #"n" = contagem,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+```
+
+
+##### 5.2 Mulheres com notificação de violência que estão com gestação de alto risco
+
+```{r, include=FALSE}
+
+## usar essa variável?
+#vivas_g5$cd_laqvas_gestacao_risco
+
+```
+
+##### 5.3 Pareamento com o SINAN
+
+```{r, include=FALSE}
+#table(vivas_g5$banco, vivas_g5$ds_raca)
+
+# Número de mulheres distintas na base que estão no SINAN g5v
+g5v_sinan <-
+  vivas_g5 %>% 
+  filter(banco == 'SINAN') %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+  ) %>% 
+  distinct() %>% 
+  nrow()
+```
+
+
+```{r, include=FALSE}
+# porcentagem
+round(g5v_sinan/g5v_total*100,2)
+```
+
+`r round(g5v_sinan/g5v_total*100,2)`% das mulheres com registro de internação por causas associadas à violência no SIH têm notificação no SINAN. Este percentual equivale a `r g5v_sinan` mulheres do total de `r g5v_total`
+
+##### 5.4 Pareamento com o SESED
+
+```{r, include=FALSE}
+
+# Número de mulheres distintas na base que estão no SESED g5v
+g5v_sesed <-
+  vivas_g5 %>% 
+  filter(banco == 'SESAP') %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+  ) %>% 
+  distinct() %>% 
+  nrow()
+
+# porcentagem
+round(g5v_sesed/g5v_total*100,2)
+
+```
+
+Das mulheres com registro de internação por causas relacionadas à violência, `r round(g5v_sesed/g5v_total*100,1)`% têm registro de ocorrência de crime não letal no sistema da SESED. Isso equivale a `r g5v_sesed` de `r g5v_total` mulheres.
+
+\pagebreak
+
+## MORTES
+
+### 1. Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN;
+
+```{r, include=FALSE}
+g1m_unicas  |> 
+  select(-banco) |>  
+  distinct() |>   
+  nrow()
+```
+
+```{r, include=FALSE}
+# numero de mulheres do grupo 1 mortas no SIH
+g1m_sih <- 
+  g1m_unicas |> 
+  filter(banco=='SIH') |>  
+  select(-banco) |>  
+  distinct() |> 
+  nrow()
+```
+
+```{r, include=FALSE}
+
+# Numero de mulheres que não estao no sih
+g1m_sinan <- 
+  g1m_unicas %>% 
+  #filter(banco !='SIH') %>% 
+  select(-banco) %>% 
+  distinct() %>%
+  nrow() - g1m_sih
+
+```
+
+```{r, include=FALSE}
+# tabela com distribuição de mulheres por banco
+g1m_freq_banco <- 
+  data.frame(
+    banco = c(
+      "SIM, SINAN, SESED_OB e SIH",
+      "Apenas SIM, SINAN e/ou SESED_OB"),
+    n = c(
+      g1m_sih,
+      g1m_sinan
+    )
+  ) %>% 
+  mutate(`%` = round(n/sum(n)*100,1)) %>% 
+  arrange(-n) %>% 
+  adorn_totals('row') |> 
+  as.data.frame() |> 
+  rename(
+    "Banco de dados" = banco
+  )
+
+g1m_freq_banco_tb <- 
+  tabela_bonita(g1m_freq_banco, "Distribuição de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN por banco de dados, Rio Grande do Norte (2019-2021)")
+# n de registros
+mortas_g1_registros <-
+  mortas_g1 |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  nrow()
+
+#
+mortas_g1_unicas <-
+  g1m_unicas  |> 
+  select(-banco) |>  
+  distinct() |>   
+  nrow()
+
+
+```
+
+Este grupo identifica mulheres que tiveram uma situação de violência detectada por serviços de saúde e/ou pela polícia e que também têm registro de óbito em algum destes sistemas, a maior parte dos registros foi identificado nos sistemas do SINAN e do SIM. O grupo possui `r mortas_g1_registros` registros, correspondendo ao atendimento de `r mortas_g1_unicas` mulheres distintas:
+
+`r g1m_freq_banco_tb`
+
+#### 1.1 Perfil das vítimas 
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g1m_fx_banco <- 
+  tabela_bonita(
+    mortas_g1 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g1m_fx_banco_prop <- 
+  tabela_bonita(
+    mortas_g1 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao,
+            pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de raça/cor por faixa etária de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include = FALSE}
+# Tabela de faixa-etária para o grupo 1
+g1m_fx_banco_prop_col <- 
+  tabela_bonita(
+    mortas_g1 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao,
+            pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de faixa etária por raça/cor de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+```
+
+```{r, include = FALSE}
+# Idade
+g1m_idade <- 
+  tab_1(
+    g1m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g1m_idade<-
+  tabela_bonita(
+    g1m_idade,
+    "Faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g1m_raca <- 
+  tab_1(
+    g1m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g1m_raca<-
+  tabela_bonita(
+    g1m_raca,
+    "Raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Bem como o grupo 1 de mulheres vivas, o perfil de mulher com maior frequência é mulher parda com idade entre 30 e 59 anos, chegando a 82% dentro dessa faixa etária.
+
+As mulheres deste grupo tinham, em sua maioria, entre 30 e 59 anos e eram pardas. Vale ressaltar que 73.8% das mulheres eram pardas.
+
+<p>
+`r g1m_idade` <br>
+`r g1m_raca` 
+</p>
+
+
+```{r, include=FALSE}
+
+#### 1.2 Riscos de morte
+
+tab_cat_sinan(mortas_g1,viol,'ds_raca')
+
+
+```
+
+
+#### Causas de morte
+```{r, include=FALSE}
+
+mortas_g1_sesap_ob_a <- 
+  mortas_g1 |> 
+  filter(banco == 'SIM') |> 
+  select(
+    par_f,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique()
+
+# Está retornando vazio
+mortas_g1_sesap_ob<-
+  tab_1(
+    mortas_g1_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+    "n" = contagem
+  )
+
+mortas_g1_sesap_ob<-
+  tabela_bonita(
+    mortas_g1_sesap_ob,
+    "Tabela de frequência para causas de morte de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g1_sesap_ob_raca<-
+  tab_2(
+    mortas_g1_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g1_sesap_ob_raca<-
+  tabela_bonita(
+    mortas_g1_sesap_ob_raca,
+    "Tabela de frequência para causas de morte por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g1_sesap_ob_raca_p<-
+  tab_2(
+    mortas_g1_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g1_sesap_ob_raca_p<-
+  tabela_bonita(
+    mortas_g1_sesap_ob_raca_p,
+    "Tabela de proporção para causas de morte por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g1_sesap_ob_idade<-
+  tab_2(
+    mortas_g1_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )|> 
+  select(
+    `Causa resumida do óbito`,
+    `0 a 9 anos`,
+    `10 a 19 anos`,
+    `20 a 29 anos`,
+    `30 a 59 anos`,
+    `60+`,
+    `Total`
+  )
+
+mortas_g1_sesap_ob_idade<-
+  tabela_bonita(
+    mortas_g1_sesap_ob_idade,
+    "Tabela de frequência para causas de morte por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g1_sesap_ob_idade_p<-
+  tab_2(
+    mortas_g1_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  ) |> 
+  select(
+    `Causa resumida do óbito`,
+    `0 a 9 anos`,
+    `10 a 19 anos`,
+    `20 a 29 anos`,
+    `30 a 59 anos`,
+    `60+`,
+    `Total`
+  )
+
+mortas_g1_sesap_ob_idade_p<-
+  tabela_bonita(
+    mortas_g1_sesap_ob_idade_p,
+    "Tabela de proporção para causas de morte por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+`r mortas_g1_sesap_ob`<br>
+`r mortas_g1_sesap_ob_raca`<br>
+`r mortas_g1_sesap_ob_raca_p`<br>
+`r mortas_g1_sesap_ob_idade` <br>
+`r mortas_g1_sesap_ob_idade_p` 
+
+```{r, include=FALSE}
+##### 1.2.3 Por encaminhamento (incluindo não encaminhamento)
+
+```
+
+#### 1.2 Tempo entre notificação e óbito
+
+```{r, include=FALSE}
+# selecionando as colunas de notificação e óbito para calcular
+mortas_g1_ob_sinan<-
+  mortas_g1%>% 
+  select(
+    par_f,
+    banco,
+    dt_ocor,
+    dt_notific
+  ) %>% 
+  filter(banco == 'SINAN')
+
+# selecionando variavies de data de morte
+mortas_g1_ob_sim<-
+  mortas_g1%>% 
+  select(
+    par_f,
+    banco,
+    dt_obito
+  ) %>% 
+  filter(banco == 'SIM')
+
+
+# Diferença entre as datas
+g1m_tp_notf_ob <- 
+  inner_join(
+    mortas_g1_ob_sinan, 
+    mortas_g1_ob_sim, 
+    by = "par_f"
+  ) %>% 
+  mutate(
+    tempo_not_ob = dt_obito - dt_notific,
+    tempo_ocor_ob = dt_obito - dt_ocor,
+    tempo_not_ob1 = as.numeric(tempo_not_ob),
+    tempo_ocor_ob1 = as.numeric(tempo_ocor_ob)
+  )
+```
+
+```{r, include=FALSE}
+
+######
+# TABELA RESUMO
+
+# resumo da diferença entre notificação e hospitalização, todos os valores
+mean_g1m_sinan_hospital_not <- 
+  summary_days(
+    g1m_tp_notf_ob,
+    tempo_not_ob1
+  )
+
+
+
+########
+### Apenas valores positivos
+########
+mean_g1m_sinan_hospital_not_positivo <-
+  g1m_tp_notf_ob |> 
+  distinct() |> 
+  filter(
+    tempo_not_ob1 >= 0,
+    tempo_not_ob1 < 31
+  )
+
+mean_g1m_sinan_hospital_not_positivo<-
+  summary_days(
+    mean_g1m_sinan_hospital_not_positivo,
+    tempo_not_ob1
+  )
+
+
+# Join entre as tabelas
+result_not_ob <-
+  mean_g1m_sinan_hospital_not %>%
+  left_join(
+    mean_g1m_sinan_hospital_not_positivo,
+    by = "Medida resumo"
+  ) |> 
+  rename(
+    'Todo o período' = Valores.x,
+    'Período de um mês' = Valores.y
+  ) |> 
+  mutate(
+    `Medida resumo` = ifelse(`Medida resumo` == "Hospitalizadas no mesmo dia", "Possível óbito no mesmo dia", `Medida resumo`)
+  )
+
+
+# Printando tabela
+result_not_ob <-
+  tabela_bonita(
+    result_not_ob,
+    "Medidas resumo do tempo entre data da notificação da violência e o óbito de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019 - 2021)"
+  )
+
+```
+
+O mesmo processo feito para calcular o tempo entre as notificações de violência e as hospitalizações (grupo 1 de mulheres vivas) , também foi calculado o tempo entre a notificação de violência e a data do óbito. Durante essa análise, também foi possível observar intervalos com valores negativos e outros com valores muito elevados. Nos casos de valores muito altos e/ou muito baixos, foi considerado que a notificação de violência não teve relação com o óbito, ao menos naquele momento. Nesse sentido, para fins de comparação, foi considerado o intervalo de 30 dias entre SINAN e SIM.
+
+É fundamental destacar que a presença de valores negativos em determinados dias pode ser atribuída à hipótese de que casos de violência foram notificados após o registro do óbito. Essa defasagem temporal entre o evento violento e a notificação pode distorcer os dados e requer atenção.
+
+Além disso, ao levar em consideração um intervalo de 30 dias entre a notificação e o óbito, o número de casos para comparação reduziu significativamente, de 159 para 50. No entanto, dentro desses 50 casos, 28% (14 mulheres) tiveram seus óbitos registrados no mesmo dia da notificação no Sistema de Informação de Agravos de Notificação (SINAN)
+
+`r result_not_ob`
+
+#### 1.3 Pareamento com SIH
+
+```{r, include=FALSE}
+
+# número de mulheres que estão no SIH
+g1m_sih_num <-
+  g1m_freq_banco |> 
+  filter(
+    `Banco de dados` == "SIM, SINAN, SESED_OB e SIH"
+  ) |> 
+  select(
+    `n`
+  ) |> 
+  as.numeric()
+
+
+# porcentagem de mulheres que estão no SIH
+g1m_sih <-
+  g1m_freq_banco |> 
+  filter(
+    `Banco de dados` == "SIM, SINAN, SESED_OB e SIH"
+  ) |> 
+  select(
+    `%`
+  ) |> 
+  as.numeric()
+
+```
+
+`r g1m_sih_num` mulheres estão no SIH, o que representa `r g1m_sih`% das mulheres desse grupo.
+
+##### 1.3.1 Filtro por Diagnóstico relacionado a violência:
+
+```{r, include=FALSE}
+
+mortas_g1 |> 
+  filter(
+    banco == 'SIH',
+    #  fl_viol_sex == 1
+  ) |> 
+  select(par_f) |> distinct()
+
+
+# filtro com mulheres que sofreram algum tipo de violência
+mortas_g1_viol_sex <-
+  mortas_g1 |> 
+  filter(
+    viol_sexu == 1
+  )
+
+# registros de mulheres que sofreram viol sexual
+mortas_g1_viol_sex_reg <- 
+  mortas_g1_viol_sex |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  nrow()
+
+
+# número único de mulheres que sofreram viol sexual
+mortas_g1_viol_sex_num <- 
+  mortas_g1_viol_sex |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique() |> 
+  nrow()
+
+
+
+```
+
+Das mulheres presentes neste grupo, foram encontradas `r mortas_g1_viol_sex_reg` registros de `r mortas_g1_viol_sex_num` mulheres com diagnóstico relacionado a violência.
+
+###### 1.3.1.1 Procedimentos
+
+```{r, include = FALSE}
+
+# Gerando tabela multi
+tab_proc <- tab_multi(
+  mortas_g1_viol_sex, proc[proc$categoria != "Total", ]$categoria, 
+  'SINAN') |> 
+  merge(proc,by="categoria",all.x=T) |> 
+  select(ds_tp_proc,n) |> 
+  mutate(porcentagem = round(n/mortas_g1_viol_sex_num*100,1)) |>
+  rename("Tipo de procedimento"=ds_tp_proc) |> 
+  arrange(-n)
+
+tab_proc <- bind_rows(
+  filter(
+    tab_proc,!`Tipo de procedimento`=="Total",
+    n>0    
+  )
+) |> 
+  rename(
+    "%" = porcentagem
+  )
+
+# Printadno tabela organizada
+g1m_proc <- 
+  tabela_bonita(
+    tab_proc,
+    "Tabela de frequência e proporção de registros de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("* Foram econtradas 3 mulheres. Vale ressaltar que uma mesma mulher pode ter passado por mais de um tipo de procedimento.")
+
+```
+
+As `r mortas_g1_viol_sex_num` passaram pelos seguintes tipos de procedimento:
+
+`r g1m_proc`
+
+###### 1.3.1.2 Tempos médios de internação
+
+```{r, include = FALSE}
+
+# Filtro de SIH e diagnóstico relacionado a agressao
+g1m_violencia <-
+  mortas_g1 |>
+  filter(
+    fl_diag_sex_agressao == 1,
+    FL_SIH == 1,
+    !is.na(dias_int)
+  ) |> 
+  select(
+    dias_int
+  )
+
+g1m_viol_dias_int<-
+  summary_days(
+    g1m_violencia,
+    dias_int
+  )
+
+g1m_viol_dias_int <-
+  tabela_bonita(
+    g1m_viol_dias_int,
+    "Medidas resumo do tempo de internação de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+as mulheres deste grupo ficaram, em média, 4.2 dias internadas
+
+`r g1m_viol_dias_int`
+
+#### 1.4 Tipo de volência no SINAN
+```{r, include=FALSE}
+# por raça/cor
+g1m_viol_raca <- tab_cat_sinan(mortas_g1, viol, "ds_raca") |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1m_viol_raca <- 
+  tabela_bonita(
+    g1m_viol_raca,
+    "Tipo de violência por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# prop
+g1m_viol_raca_p <- tab_cat_sinan(mortas_g1, viol, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1m_viol_raca_p <- 
+  tabela_bonita(
+    g1m_viol_raca_p,
+    "Proporção do tipo de violência por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+    )
+
+
+# por idade
+g1m_viol_idade <- tab_cat_sinan(mortas_g1, viol, "faixa_etaria_padrao") |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1m_viol_idade <- 
+  tabela_bonita(
+    g1m_viol_idade,
+    "Tipo de violência por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# Prop
+
+g1m_viol_idade_p <- tab_cat_sinan(mortas_g1, viol, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de violência" = tipo_viol)
+
+g1m_viol_idade_p <- 
+  tabela_bonita(
+    g1m_viol_idade_p,
+    "Proporção do tipo de violência por faixa etária de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r g1m_viol_raca`<br>
+`r g1m_viol_raca_p`<br>
+`r g1m_viol_idade`<br>
+`r g1m_viol_idade_p`<br>
+
+#### 1.5 Tipo de encaminhamento
+```{r, include=FALSE}
+
+# por raça/cor
+g1m_enc_raca <- tab_cat_sinan(mortas_g1, enc, "ds_raca") |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1m_enc_raca <- 
+  tabela_bonita(
+    g1m_enc_raca,
+    "Tipo de encaminhamento por raça/cor de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# prop
+# por raça/cor
+g1m_enc_raca_p <- tab_cat_sinan(mortas_g1, enc, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1m_enc_raca_p <- 
+  tabela_bonita(
+    g1m_enc_raca_p,
+    "Proporções por tipo de encaminhamento por raça/cor de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+# por idade
+g1m_enc_idade <- tab_cat_sinan(mortas_g1, enc, "faixa_etaria_padrao") |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1m_enc_idade <- 
+  tabela_bonita(
+    g1m_enc_idade,
+    "Tipo de encaminhamento por faixa etária de Mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)")
+    
+# PROPORÇÃO
+
+g1m_enc_idade_p <- tab_cat_sinan(mortas_g1, enc, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de encaminhamento" = tipo_enc)
+
+g1m_enc_idade_p <- 
+  tabela_bonita(
+    g1m_enc_idade_p,
+    "Proporções por tipo de encaminhamento por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r g1m_enc_raca` <br>
+`r g1m_enc_raca_p` <br>
+`r g1m_enc_idade` <br>
+`r g1m_enc_idade_p`<br>
+
+#### 1.6 Tipo de procedimento (geral para o grupo)
+```{r, include=FALSE}
+
+# por raça/cor
+g1m_proc_raca <- tab_cat_sinan(mortas_g1_viol_sex, proc, "ds_raca") |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1m_proc_raca <- 
+  tabela_bonita(
+    g1m_proc_raca,
+    "Tipo de procedimento por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+# prop
+# por raça/cor
+g1m_proc_raca_p <- tab_cat_sinan(mortas_g1_viol_sex, proc, "ds_raca", pct_reg = TRUE) |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1m_proc_raca_p <- 
+  tabela_bonita(
+    g1m_proc_raca_p,
+    "Proporção por tipo de procedimento por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+# Num
+# por idade
+g1m_proc_idade <- tab_cat_sinan(mortas_g1_viol_sex, proc, "faixa_etaria_padrao") |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1m_proc_idade <- 
+  tabela_bonita(
+    g1m_proc_idade,
+    "Tipo de procedimento por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, mas sem Boletim de Ocorrência, Rio Grande do Norte (2019-2021)"
+  )
+
+# proporção
+# por idade
+g1m_proc_idade_p <- tab_cat_sinan(mortas_g1_viol_sex, proc, "faixa_etaria_padrao", pct_reg = TRUE) |> 
+  rename("Tipo de procedimento" = tipo_proc)
+
+g1m_proc_idade_p <- 
+  tabela_bonita(
+    g1m_proc_idade_p,
+    "Proporção por tipo de procedimento por faixa etária de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r g1m_proc_raca` <br>
+`r g1m_proc_raca_p` <br>
+`r g1m_proc_idade` <br>
+`r g1m_proc_idade_p`<br>
+
+### 2. Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN
+
+```{r, include=FALSE}
+g2m_sih <- 
+  g2m_unicas |> 
+  filter(banco=='SIH') |>  
+  select(-banco) |>  
+  distinct() |> 
+  nrow()
+
+```
+
+```{r, include=FALSE}
+
+# Numero de mulheres que não estao no sih
+g2m_sesed <- 
+  g2m_unicas %>% 
+  #filter(banco !='SIH') %>% 
+  select(-banco) %>% 
+  distinct() %>%
+  nrow() - g2m_sih
+
+```
+
+```{r, include=FALSE}
+# tabela com distribuição de mulheres por banco
+g2m_freq_banco <- 
+  data.frame(
+    banco = c(
+      "SIM, SESED_OB, SESED e SIH",
+      "Apenas SIM, SESED_OB e SESED"),
+    n = c(
+      g2m_sih,
+      g2m_sesed
+    )
+  ) %>% 
+  mutate(`%` = round(n/sum(n)*100,1)) %>% 
+  arrange(-n) %>% 
+  adorn_totals('row') |> 
+  as.data.frame() |> 
+  rename(
+    "Banco de dados" = banco
+  )
+
+# Registros de mulheres mortas grupo 2
+mortas_g2_registros<-
+  mortas_g2 |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  nrow() |> 
+  as.numeric()
+
+# número de mulheres mortas grupo 2
+mortas_g2_unicas<- 
+  mortas_g2 |> 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  distinct() |> 
+  nrow() |> 
+  as.numeric()
+
+
+g2m_freq_banco <-
+  tabela_bonita(
+    g2m_freq_banco, 
+    "Distribuição de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN (2019-2021)")
+```
+
+Este grupo identifica mulheres com registro de óbito que tiveram registro de violência pela polícia, mas não no sistema de saúde. O grupo possui `r mortas_g2_registros` registros, correspondendo ao atendimentos de `r mortas_g2_unicas` mulheres distintas, com a seguinte distribuição entre os bancos de dados:
+
+`r g2m_freq_banco`
+
+#### 2.1. Perfil das vítimas
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g2m_fx_banco <- 
+  tabela_bonita(
+    mortas_g2 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao
+      ) %>% 
+      select(
+        ds_raca,
+        # "0 a 9 anos",
+        # "10 a 19 anos",
+        # "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g2m_fx_banco_prop <- 
+  tabela_bonita(
+    mortas_g2 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao,
+            pct_row =TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        # "0 a 9 anos",
+        # "10 a 19 anos",
+        # "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        #"NA",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de raça/cor por faixa etária de mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include = FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g2m_fx_banco_prop_col <- 
+  tabela_bonita(
+    mortas_g2 %>% 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) %>% 
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao,
+            pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        #  "0 a 9 anos",
+        #  "10 a 19 anos",
+        # "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        #"NA",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+
+
+```
+
+```{r, include = FALSE}
+# Idade
+g2m_idade <- 
+  tab_1(
+    g2m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g2m_idade<-
+  tabela_bonita(
+    g2m_idade,
+    "Faixa etária de mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g2m_raca <- 
+  tab_1(
+    g2m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g2m_raca<-
+  tabela_bonita(
+    g2m_raca,
+    "Raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Das mulheres com Boletim de Ocorrência que vieram a óbito, aproximadamente 57.9% das mulheres em todas as faixas de idade eram pardas e das mulheres pardas, 54.5% tinham entre 30 e 59 anos. Outro fator importante é observar que não há mulheres menores de 20 anos neste recorte.
+
+<p>
+`r g2m_raca` <br>
+`r g2m_idade` <br>
+</p>
+
+
+#### 2.2 Caracterização da violência 
+```{r, include=FALSE}
+
+g2m_tpocor_raca <- 
+  tab_2(
+    mortas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    ds_raca
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+    #"n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2m_tpocor_raca <- 
+  tabela_bonita(
+    g2m_tpocor_raca,
+    "Tabela de frequência de tipos de ocorrência por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)")
+
+
+
+
+
+g2m_tpocor_raca_p <- 
+  tab_2(
+    mortas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    ds_raca,
+    pct=TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+    #"n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2m_tpocor_raca_p <- 
+  tabela_bonita(
+    g2m_tpocor_raca_p,
+    "Tabela de proporção de tipos de ocorrência por raça/cor de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)")
+```
+
+```{r, include = FALSE}
+
+g2m_tpocor_idade <- 
+  tab_2(
+    mortas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+    #"n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2m_tpocor_idade <- 
+  tabela_bonita(
+    g2m_tpocor_idade,
+    "Tabela de frequência de tipos de ocorrência por idade de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)")
+
+
+# proporção
+g2m_tpocor_idade_p <- 
+  tab_2(
+    mortas_g2 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor,
+    faixa_etaria_padrao,
+    pct=TRUE
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor
+    #"n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g2m_tpocor_idade_p <- 
+  tabela_bonita(
+    g2m_tpocor_idade_p,
+    "Tabela de proporção de tipos de ocorrência por idade de mulheres com registro de óbito no SIM e/ou com Boletim de Ocorrência letal e que têm notificação de violência no SINAN, Rio Grande do Norte (2019-2021)")
+
+
+
+
+```
+
+`r g2m_tpocor_raca` <br>
+`r g2m_tpocor_raca_p`<br>
+`r g2m_tpocor_idade` <br>
+`r g2m_tpocor_idade_p`
+
+#### 2.3 Causas de morte
+
+```{r, include=FALSE}
+mortas_g2_sesap_ob_a <- 
+  mortas_g2 |> 
+  filter(banco == 'SIM') |> 
+  select(
+    par_f,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique()
+
+# Está retornando vazio
+mortas_g2_sesap_ob<-
+  tab_1(
+    mortas_g2_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+    "n" = contagem
+  )
+
+mortas_g2_sesap_ob<-
+  tabela_bonita(
+    mortas_g2_sesap_ob,
+    "Tabela de frequência para causas de morte de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g2_sesap_ob_raca<-
+  tab_2(
+    mortas_g2_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g2_sesap_ob_raca<-
+  tabela_bonita(
+    mortas_g2_sesap_ob_raca,
+    "Tabela de frequência para causas de morte por raça/cor de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g2_sesap_ob_raca_p<-
+  tab_2(
+    mortas_g2_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g2_sesap_ob_raca_p<-
+  tabela_bonita(
+    mortas_g2_sesap_ob_raca_p,
+    "Tabela de proporção para causas de morte por raça/cor de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g2_sesap_ob_idade<-
+  tab_2(
+    mortas_g2_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )|> 
+  select(
+    `Causa resumida do óbito`,
+    # `0 a 9 anos`,
+    # `10 a 19 anos`,
+    # `20 a 29 anos`,
+    `30 a 59 anos`,
+    `60+`,
+    `Total`
+  )
+
+mortas_g2_sesap_ob_idade<-
+  tabela_bonita(
+    mortas_g2_sesap_ob_idade,
+    "Tabela de frequência para causas de morte por faixa etária de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g2_sesap_ob_idade_p<-
+  tab_2(
+    mortas_g2_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  ) |> 
+  select(
+    `Causa resumida do óbito`,
+    # `0 a 9 anos`,
+    # `10 a 19 anos`,
+    # `20 a 29 anos`,
+    `30 a 59 anos`,
+    `60+`,
+    `Total`
+  )
+
+mortas_g2_sesap_ob_idade_p<-
+  tabela_bonita(
+    mortas_g2_sesap_ob_idade_p,
+    "Tabela de proporção para causas de morte por faixa etária de Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+`r mortas_g2_sesap_ob`<br>
+`r mortas_g2_sesap_ob_raca`<br>
+`r mortas_g2_sesap_ob_raca_p`<br>
+`r mortas_g2_sesap_ob_idade` <br>
+`r mortas_g2_sesap_ob_idade_p` 
+
+
+```{r, include=FALSE}
+##### 2.1.1 Por idade
+```
+
+```{r, include=FALSE}
+##### 2.1.2. Por raça/cor
+```
+
+```{r, include=FALSE}
+##### 2.1.3 Por tipo de crime (incluindo não encaminhamento)
+```
+
+### 3. Mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal
+
+Esse grupo é constituído exclusivamente por mulheres que têm registros de óbito tanto no Sistema de Informações sobre Mortalidade (SIM) Secretaria de Estado da Segurança Pública e da Defesa Social Óbito (SESES Óbito). Em outras palavras, são mulheres que estão na interseção desses dois bancos de dados. Importante ressaltar que aquelas presentes nessas duas bases de dados e eventualmente em outras, como o Sistema de Informações Hospitalares (SIH), Sistema de Informação de Agravos de Notificação (SINAN) e Secretaria de Estado da Segurança Pública e da Defesa Social (SESED), não foram incluídas nesse recorte. Essas mulheres estão distribuídas nos demais grupos relacionados a óbitos, destacando a precisão desse agrupamento específico para análises mais focadas.
+
+#### 3.1 Perfil das vítimas (idade, raça/cor)
+
+```{r include=FALSE}
+
+# Perfis das vítimas em raça/cor por faixa-etária
+g3m_fx_raca <-
+  tabela_bonita(
+    mortas_g3  |>  
+      select(
+        par_f,
+        #banco, 
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |>  
+      distinct() %>% 
+      tab_2(., 
+            ds_raca,
+            faixa_etaria_padrao
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de frequência de raça/cor por faixa etária de mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+vivas_g3|> 
+  distinct(par_f, ds_raca, faixa_etaria_padrao, banco) |> tab_1(banco)
+
+```
+
+```{r, include=FALSE}
+# Tabela de faixa-etária para o grupo 1
+g3m_fx_raca_prop <- 
+  tabela_bonita(
+    mortas_g3 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct() %>%
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct_row=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de raça/cor por faixa etária de mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  ) |> 
+  tab_footnote("")
+
+```
+
+```{r, include=FALSE}
+
+# Tabela de faixa-etária para o grupo 1
+g3m_fx_raca_prop_col <- 
+  tabela_bonita(
+    mortas_g3 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct() %>%
+      tab_2(
+        ., 
+        ds_raca,
+        faixa_etaria_padrao,
+        pct=TRUE
+      ) %>% 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de faixa etária por raça/cor de mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  ) |> 
+  tab_footnote("")
+
+```
+
+```{r, include = FALSE}
+# Idade
+g3m_idade <- 
+  tab_1(
+    mortas_g3 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g3m_idade<-
+  tabela_bonita(
+    g3m_idade,
+    "Faixa etária de Mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g3m_raca <- 
+  tab_1(
+        mortas_g3 |> 
+      select(
+        par_f,
+        ds_raca, 
+        faixa_etaria_padrao
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g3m_raca<-
+  tabela_bonita(
+    g3m_raca,
+    "Raça/cor de Mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+Esta coorte é composta majoritariamente por mulheres pardas entre 30 e 59 anos de idade. Esta raça/cor predomina entre todos os grupos etários.
+
+<p>
+`r g3m_raca` <br>
+`r g3m_idade` <br>
+</p>
+
+#### 3.2 Causas de morte
+
+```{r, include=FALSE}
+
+mortas_g3_sesap_ob_a <- 
+  mortas_g3 |> 
+  filter(banco == 'SIM') |> 
+  select(
+    par_f,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  unique()
+
+# Está retornando vazio
+mortas_g3_sesap_ob<-
+  tab_1(
+    mortas_g3_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+    "n" = contagem
+  )
+
+mortas_g3_sesap_ob<-
+  tabela_bonita(
+    mortas_g3_sesap_ob,
+    "Tabela de frequência para causas de morte de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  ) |> 
+  tab_footnote("Uma mulher está sem preenchimento para a cuasa de óbito, por isso o valor da tabela está como 2017 e não 2018.")
+```
+
+A principal causa da morte para este grupo foi decorrente de agressões (90.8%). 
+
+`r mortas_g3_sesap_ob`
+
+
+
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g3_sesap_ob_raca<-
+  tab_2(
+    mortas_g3_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g3_sesap_ob_raca<-
+  tabela_bonita(
+    mortas_g3_sesap_ob_raca,
+    "Tabela de frequência para causas de morte por raça/cor de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g3_sesap_ob_raca_p<-
+  tab_2(
+    mortas_g3_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    ds_raca,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g3_sesap_ob_raca_p<-
+  tabela_bonita(
+    mortas_g3_sesap_ob_raca_p,
+    "Tabela de proporção para causas de morte por raça/cor de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+```{r, include=FALSE}
+
+# Está retornando vazio
+mortas_g3_sesap_ob_idade<-
+  tab_2(
+    mortas_g3_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g3_sesap_ob_idade<-
+  tabela_bonita(
+    mortas_g3_sesap_ob_idade,
+    "Tabela de frequência para causas de morte por faixa etária de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+
+# Proporção raça
+
+# Está retornando vazio
+mortas_g3_sesap_ob_idade_p<-
+  tab_2(
+    mortas_g3_sesap_ob_a,
+    CIDBR_RESUMIDO_EXTERNAS,
+    faixa_etaria_padrao,
+    pct=TRUE
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS
+    #"n" = contagem
+  )
+
+mortas_g3_sesap_ob_idade_p<-
+  tabela_bonita(
+    mortas_g3_sesap_ob_idade_p,
+    "Tabela de proporção para causas de morte por faixa etária de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+  )
+```
+
+`r mortas_g3_sesap_ob_raca`<br>
+`r mortas_g3_sesap_ob_raca_p`<br>
+`r mortas_g3_sesap_ob_idade`<br>
+`r mortas_g3_sesap_ob_idade_p`<br>
+
+
+```{r, include=FALSE}
+#### 3.3 Comparar causas de óbito x tipos de crime
+
+# mortas_g3 |>  
+#   select(
+#     par_f,
+#     banco,
+#     ds_tp_ocor,
+#     CIDBR_RESUMIDO_EXTERNAS,
+#     dt_obito,
+#     dt_ocor
+#     )
+
+g3m_tpocor_tb <- 
+  tab_1(
+    mortas_g3 %>% 
+      filter(banco == 'SESAP'),
+    ds_tp_ocor
+  )  |> 
+  mutate(ds_tp_ocor = case_when(
+    ds_tp_ocor == "AMEAÃ‡A" ~ "Ameaça",
+    ds_tp_ocor == "LESÃƒO CORPORAL" ~ "Lesão corporal",
+    ds_tp_ocor == "DIFAMAÃ‡ÃƒO" ~ "Difamação",
+    ds_tp_ocor == "CALÃšNIA" ~ "Calúnia",
+    ds_tp_ocor == "ESTUPRO VULNERÃ<81>VEL" ~ "Estupro de vulnerável",
+    ds_tp_ocor == "DESCUMPRIMENTO MEDIDAS PROTETIVA URGÃŠNCIA" ~ "Descumprimento de medidas protetivas de urgência",
+    ds_tp_ocor == "VIAS FATO" ~ "Vias Fato",
+    ds_tp_ocor == "ESTUPRO" ~ "Estupro",
+    ds_tp_ocor == "EXTORSÃƒO" ~ "Extorsão",
+    TRUE ~ ds_tp_ocor  # Mantém os valores originais que não correspondem a nenhum dos anteriores
+  )
+  )|> 
+  rename(
+    "Tipo da Ocorrência" = ds_tp_ocor,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+# Tipo de ocorrência no SESED, grupo 2
+g3m_tpocor <- 
+  tabela_bonita(
+    g3m_tpocor_tb,
+    "Tabela de frequência proporção de Mulheres com Boletim de Ocorrência, mas que não têm notificação de violência no SINAN ocorrência no Rio Grande do Norte (2019-2021)")
+
+tab_1(mortas_g3, banco)
+```
+
+```{r, include=FALSE}
+#### 3.4 Pareamento com o SINAN
+
+g3m_distr_banco <- tabela_bonita(
+  tab_1(
+    mortas_g3,
+    banco
+  ),
+  "Número de registros De Mulheres com registro de óbito no SIM e/ou Boletim de Ocorrência letal que possuem Boletim de Ocorrência por violência (não letal), mas sem registro de notificação no SINAN por banco de dados, Rio Grande do Norte (2019-2021)"
+)
+
+# mulheres distintas no SINAN
+g3m_sinan <- 
+  mortas_g3 %>%
+  select(
+    par_f,
+    ds_raca,
+    sg_sexo,
+    banco
+  ) %>% 
+  distinct() %>% 
+  filter(
+    banco == "SINAN"
+  ) %>% 
+  nrow()
+```
+
+```{r, include=FALSE}
+# Mulheres distintas no grupo 3 de mulheres mortas
+g3m_bancos <-
+  mortas_g3 %>% 
+  select(
+    par_f,
+    ds_raca,
+    sg_sexo,
+    # banco
+  ) %>% 
+  distinct() %>% 
+  nrow()
+# Há `r g3m_sinan` mulheres no SINAN, que representam `r round(g3m_sinan/g3m_bancos *100,1)`% do total do recorte
+```
+
+
+```{r, include=FALSE}
+#### 3.5 Mulheres com causa relacionadas a violência e não estão no SINAN ou em Boletim de Ocorrência
+# POR ENQUANTO RETORNANDO 0, verificar após o ajuste no g3
+mortas_g3 |> 
+  filter(
+    viol_sexu == 1
+  )
+
+```
+
+```{r, include=FALSE}
+#### 3.6 Características das internações (SIH)
+# mortas_g3<-
+#   df_fem |> 
+#   filter(
+#     FL_SIM == 1,
+#     FL_SESAP_OB == 1
+#   )
+#f <- table(mortas_g3$cd_diag_pri, mortas_g3$cd_diag_sec_1)
+
+# Adicionando a categoria da tabela icd_map_res
+g3m_internacoes_cat <- mortas_g3 %>%
+  filter(banco == 'SIH') %>%
+  rename(ICD_10 = cd_diag_pri) %>%
+  left_join(icd_map_res, by = "ICD_10")
+
+# Se você quiser realizar a função tab_1() no resultado
+g3m_internacoes_cat <- 
+  tab_1(
+    g3m_internacoes_cat, 
+    causa_resumida
+  ) |> 
+  rename(
+    "Causa resumida" = causa_resumida,
+    "n" = contagem
+  ) |> 
+  as.data.frame()
+
+# tabela de diagnosticos primários g3 mortas
+g3m_internacoes <- 
+  tabela_bonita(
+    g3m_internacoes_cat ,
+    "Tabela de frequência e porcentagem dos registros por causa resumida da CID-10 como motivo de internação de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência Letal, Rio Grande do Norte (2019-2021)"
+  )
+#`r g3m_internacoes`
+
+```
+
+```{r, include=FALSE}
+
+#### 3.7 Proporções de causas de óbito no SIM
+# Ajustando colunas e filtrando banco
+g3m_causabas_cat <-
+  mortas_g3 %>%
+  filter(banco == 'SIM') %>%
+  rename(ICD_10 = cd_causabas) %>%
+  left_join(icd_map_res, by = "ICD_10")
+
+# tabela de frequencia
+g3m_causabas_cat <- 
+  tab_1(
+    g3m_causabas_cat, 
+    causa_resumida
+  ) |> 
+  rename(
+    "Causa base" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+# tabela de diagnosticos primários g3 mortas
+g3m_internacoes <- 
+  tabela_bonita(
+    g3m_internacoes_cat ,
+    "Tabela de frequência e porcentagem das causas bases do óbito  de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência Letal segundo grupos da CID-10, Rio Grande do Norte (2019-2021)"
+  )
+
+# `r g3m_internacoes`
+
+```
+### Comparação entre os grupos 1, 2 e 3
+##### Comparação entre a rça/cor
+
+```{r, include=FALSE}
+comparacao_raca <- function(df) { 
+  df  |>  
+    select(
+      par_f,
+      ds_raca, 
+      faixa_etaria_padrao
+    ) |> 
+    distinct() %>%  
+    tab_1(., 
+          ds_raca
+    )
+}
+
+g1m_raca <- comparacao_raca(mortas_g1)
+g2m_raca <- comparacao_raca(mortas_g2)
+g3m_raca <- comparacao_raca(mortas_g3)
+# g4m_raca <- comparacao_raca(mortas_g4)
+# g5m_raca <- comparacao_raca(mortas_g5)
+
+raca_tds_ob <-
+  g1m_raca |>
+  full_join(g2m_raca, by = "ds_raca") |> 
+  full_join(g3m_raca, by = "ds_raca") |>
+  #full_join(g4m_raca, by = "ds_raca") |>
+  #full_join(g5m_raca, by = "ds_raca") |> 
+  rename(
+    'Grupo 1 (n)' = contagem.x,
+    'Grupo 1 (%)' = `%.x`,
+    'Grupo 2 (n)' = contagem.y,
+    'Grupo 2 (%)' = `%.y`,
+    # 'Grupo 3 (n)' = contagem.x.x,
+    # 'Grupo 3 (%)' = `%.x.x`,
+    # 'Grupo 4 (n)' = contagem.y.y,
+    # 'Grupo 4 (%)' = `%.y.y`,
+    'Grupo 3 (n)' = contagem,
+    'Grupo 3 (%)' = `%`
+  ) |> 
+  arrange(ds_raca)
+
+# NA para 0
+raca_tds_ob[is.na(raca_tds_ob)] <- 0
+
+raca_tds_ob<-
+  tabela_bonita(
+    raca_tds_ob,
+    "Tabela de comparação de raça/cor dos grupos 1, 2 e 3 de mulheres que foram a óbito, Rio Grande do Norte (2019-2021)"
+  )
+
+
+```
+
+`r raca_tds_ob`
+
+```{r, include = FALSE}
+
+# Função para comparar as idades
+comparacao_idade <- function(df) { 
+  df  |>  
+    select(
+      par_f,
+      ds_raca, 
+      faixa_etaria_padrao
+    ) |> 
+    distinct() %>%  
+    tab_1(., 
+          faixa_etaria_padrao
+    ) |> 
+    arrange(faixa_etaria_padrao)
+}
+
+g1m_fx_et <- comparacao_idade(mortas_g1)
+g2m_fx_et <- comparacao_idade(mortas_g2)
+g3m_fx_et <- comparacao_idade(mortas_g3)
+
+
+fx_et_tds_ob <-
+  g1m_fx_et |> 
+  left_join(g2m_fx_et, by = "faixa_etaria_padrao") |> 
+  left_join(g3m_fx_et, by = "faixa_etaria_padrao") |> 
+
+  rename(
+    'Grupo 1 (n)' = contagem.x,
+    'Grupo 1 (%)' = `%.x`,
+    'Grupo 2 (n)' = contagem.y,
+    'Grupo 2 (%)' = `%.y`,
+    'Grupo 3 (n)' = contagem,
+    'Grupo 3 (%)' = `%`
+
+  )
+
+fx_et_tds_ob[is.na(fx_et_tds_ob)] <- 0
+
+fx_et_tds_ob<-
+  tabela_bonita(
+    fx_et_tds_ob,
+    "Tabela de comparação entre as faixas etárias dos grupos 1, 2 e 3 de mulheres que foram a óbito, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+##### Comparação entre as idades
+
+`r fx_et_tds_ob`
+
+
+#### Comparação entre as causas de morte
+
+```{r, include=FALSE}
+
+# Comparação de causas de óbito entre os grupos
+caus_ob<-function(df){
+  tab_1(
+    df |> 
+      filter(
+        banco=="SIM"
+      ) |> 
+      select(par_f, CIDBR_RESUMIDO_EXTERNAS)
+    , CIDBR_RESUMIDO_EXTERNAS
+  )
+}
+
+g1m_caus_ob <- caus_ob(mortas_g1)
+
+g2m_caus_ob <- caus_ob(mortas_g2)
+
+g3m_caus_ob <- caus_ob(mortas_g3)
+
+#g4m_caus_ob <- caus_ob(mortas_g4)
+
+#g5m_caus_ob <- caus_ob(mortas_g5)
+
+causa_ob_tds <-
+  full_join(g1m_caus_ob, g2m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+  full_join(g3m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+  # left_join(g4m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+  # left_join(g5m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS") |> 
+  rename(
+    'Grupo 1 (n)' = contagem.x,
+    'Grupo 1 (%)' = `%.x`,
+    'Grupo 2 (n)' = contagem.y,
+    'Grupo 2 (%)' = `%.y`,
+    # 'Grupo 3 (n)' = contagem.x.x,
+    # 'Grupo 3 (%)' = `%.x.x`,
+    # 'Grupo 4 (n)' = contagem.y.y,
+    # 'Grupo 4 (%)' = `%.y.y`,
+    'Grupo 5 (n)' = contagem,
+    'Grupo 5 (%)' = `%`
+  ) |> 
+  arrange(CIDBR_RESUMIDO_EXTERNAS)
+
+
+causa_ob_tds[is.na(causa_ob_tds)] <- 0
+
+causa_ob_tds<-
+  tabela_bonita(
+    causa_ob_tds,
+    'Comparação entre as causas de óbito dos grupos 1, 2 e 3. Rio Grande do Norte, (2019, 2021)'
+  )
+
+``` 
+
+`r causa_ob_tds`
+
+### 4. Mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM
+
+```{r, include=FALSE}
+g4m_fx_banco <- 
+  tabela_bonita(
+    tab_2(
+      g4m_unicas|> 
+        select(-banco) |> 
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        # "20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Frequência de Mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM por raça cor e faixa etária, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include = FALSE}
+
+# Prop por linha
+g4m_fx_banco_prop <- 
+  tabela_bonita(
+    tab_2(
+      g4m_unicas|> 
+        select(-banco) |> 
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+      pct_row = TRUE
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        #"20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ) |> 
+      rename(
+        "Raça/cor" = ds_raca
+      ),
+    "Tabela de proporção de raça/cor por faixa etária de mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include = FALSE}
+
+# Prop por coluna
+g4m_fx_banco_prop_col <- 
+  tabela_bonita(
+    tab_2(
+      g4m_unicas|> 
+        select(-banco) |> 
+        distinct(),
+      ds_raca,
+      faixa_etaria_padrao,
+      pct = TRUE
+    ) |> 
+      select(
+        ds_raca,
+        "0 a 9 anos",
+        "10 a 19 anos",
+        #"20 a 29 anos",
+        "30 a 59 anos",
+        "60+",
+        Total
+      ) |> 
+      filter(
+        ds_raca != 'Total'
+      ),
+    "Tabela de proporção de faixa etária por raça/cor de mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM, Rio Grande do Norte (2019-2021)",
+    text_row = TRUE
+  )
+
+```
+
+```{r, include = FALSE}
+# Idade
+g4m_idade <- 
+  tab_1(
+    g4m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    faixa_etaria_padrao
+  ) |>
+  arrange(faixa_etaria_padrao) |>
+  rename(
+    "Faixa etária"=faixa_etaria_padrao,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g4m_idade<-
+  tabela_bonita(
+    g4m_idade,
+    "Faixa etária de mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+```{r, include=FALSE}
+
+# Raça/cor
+g4m_raca <- 
+  tab_1(
+    g4m_unicas |> 
+      select(
+        -banco    
+      ) |> 
+      distinct(), 
+    ds_raca
+  ) |>
+  rename(
+    "Raça/cor"=ds_raca,
+    "n"=contagem
+  )
+
+
+# Printando tabela
+g4m_raca<-
+  tabela_bonita(
+    g4m_raca,
+    "Raça/cor de mulheres que tiveram seu óbito registrado em Boletim de Ocorrência, mas que não têm registro de óbito no SIM, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+Neste grupo foram identificados `r mortas_g4 |> nrow()` registros de `r g4m_unicas |> select(-banco) |> distinct() |> nrow()` mulheres distintas. O valor igual reforça que não há duplicidade, uma vez que um óbito gera um único registro.
+
+O grupo é majoritariamente composto por mulheres pardas de 30 a 59 anos. 
+
+<p> 
+`r g4m_raca` <br>
+`r g4m_idade` <br>
+</p>
+
+
+
+```{r, include=FALSE}
+#### 4.1 Causas de morte
+# mortas_g4_sesap_ob <- 
+#   mortas_g4 |> 
+#   select(
+#     par_f,
+#     cd_causabas
+#   ) |> 
+#   unique()
+# 
+# # Está retornando vazio
+# mortas_g4_sesap_ob<-
+#   tab_1(
+#     mortas_g3_sesap_ob,
+#     CIDBR_RESUMIDO_EXTERNAS
+#   ) |> 
+#   rename(
+#     "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+#     "n" = contagem
+#   )
+# 
+# mortas_g4_sesap_ob<-
+#   tabela_bonita(
+#     mortas_g3_sesap_ob,
+#     "Tabela de frequência para causas de morte de mulheres que tiveram seu óbito registrado no SIM e têm registro de Boletim de Ocorrência letal, Rio Grande do Norte (2019-2021)"
+#   )
+
+```
+
+
+\pagebreak
+
+### 5. Mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal
+
+
+```{r, include=FALSE}
+
+# Mulheres mortas G5 únicas
+g5m_num <- mortas_g5 %>% 
+  select(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao) %>% 
+  distinct %>% 
+  nrow()
+
+
+
+```
+
+O grupo é composto por mulheres que podem estar em todos os bancos
+
+No total, foram identificadas apenas `r g5m_num` mulheres distintas distribuídas em `r mortas_g5 |> nrow()` registros
+
+#### 5.1 Qual tipo de violência no Sinan e qual tipo de crime no Boletim de Ocorrência
+
+```{r, include=FALSE}
+
+# # tipo de violencia no SINAN g5m
+g5m_viol <- tab_multi(
+  mortas_g5, viol[viol$categoria != "Total", ]$categoria,'SINAN') %>%
+  merge(viol,by="categoria",all.x=T) %>%
+  select(ds_tp_viol,n) %>%
+  mutate(`%` = round(n/g5m_num*100,1)) |>
+  rename("Tipo de violência"=ds_tp_viol) %>%
+  arrange(-n)
+
+g5m_viol <- bind_rows(
+  filter(g5m_viol,!`Tipo de violência`=="Total")
+)
+
+# cluster
+g5m_viol<-
+  g5m_viol |>
+  filter(
+    n>0
+  )
+
+# Tipos de violência no Sinan, Mulheres mortas do grupo 5
+g5m_viol <-
+  tabela_bonita(
+    g5m_viol,
+    "Tipo de violência Registrado no SINAN de Mulheres que vieram a óbito que estão no SINAN e no SESED e estão no SIM e SESED Óbito, Rio Grande do Norte (2019-2021)"
+  ) |>
+  tab_footnote("* O denominador da porcentagem é o número de mulheres únicas.")
+
+
+```
+
+`r g5m_viol`
+
+```{r, include=FALSE}
+
+# tabela de crimes no SESED
+g5m_sesed <-
+  tabela_bonita(
+    tab_1(
+      mortas_g5,
+      ds_tp_ocor
+    ),
+    "Tipo de crime Registrado no SESED de Mulheres que vieram a óbito que Estavam no SINAN e no SESED e estão no SIM e SESED Óbito, Rio Grande do Norte (2019-2021)"
+  )
+
+
+```
+
+```{r, include = FALSE}
+
+# explicando duas variáveis
+
+tab_2(mortas_g5, ds_raca, faixa_etaria_padrao)
+
+```
+
+```{r, include = FALSE}
+vivas_g1 %>%
+  dplyr::group_by(
+    ds_raca,
+    faixa_etaria_padrao
+  ) %>%
+  summarise(
+    contagem = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(pct = contagem/sum(contagem)*100) %>%
+  arrange(-pct)
+```
+
+#### 5.2 Perfil das vítimas
+
+```{r, include = FALSE}
+# # Tabela de faixa-etária para o grupo 1
+# g5m_fx_banco <-
+#   tabela_bonita(
+#     mortas_g5 |>
+#       select(
+#         par_f,
+#         ds_raca,
+#         faixa_etaria_padrao
+#       ) |>
+#       distinct() %>%
+#       tab_2(
+#         .,
+#         ds_raca,
+#         faixa_etaria_padrao
+#       ) %>%
+#       select(
+#         ds_raca,
+#         #  "0 a 9 anos",
+#         #  "10 a 19 anos",
+#         #  "20 a 29 anos",
+#         #  "30 a 59 anos",
+#         "60+",
+#         Total
+#       ) |>
+#       rename(
+#         "Raça/cor" = ds_raca
+#       ),
+#     "Tabela de frequência de Mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019-2021)",
+#     text_row = TRUE
+#   )
+
+```
+
+```{r, include = FALSE}
+
+# # Proporção por linha
+# g5m_fx_banco_pct_row <-
+#   tabela_bonita(
+#     mortas_g5 |>
+#       select(
+#         par_f,
+#         ds_raca,
+#         faixa_etaria_padrao
+#       ) |>
+#       distinct() %>%
+#       tab_2(
+#         .,
+#         ds_raca,
+#         faixa_etaria_padrao,
+#         pct_row = TRUE
+#       ) %>%
+#       select(
+#         ds_raca,
+#         #  "0 a 9 anos",
+#         #  "10 a 19 anos",
+#         #  "20 a 29 anos",
+#         # "30 a 59 anos",
+#         "60+",
+#         Total
+#       ) |>
+#       filter(
+#         ds_raca != 'Total'
+#       )|>
+#       rename(
+#         "Raça/cor" = ds_raca
+#       ),
+#     "Tabela de proporção de raça/cor por faixa etária de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal, Rio Grande do Norte (2019-2021)",
+#     text_row = TRUE
+#   )
+
+```
+
+```{r, include = FALSE}
+
+# # proporção por coluna
+# g5m_fx_banco_pct_col <-
+#   tabela_bonita(
+#     mortas_g5 |>
+#       select(
+#         par_f,
+#         ds_raca,
+#         faixa_etaria_padrao
+#       ) |>
+#       distinct() %>%
+#       tab_2(
+#         .,
+#         ds_raca,
+#         faixa_etaria_padrao,
+#         pct = TRUE
+#       ) %>%
+#       select(
+#         ds_raca,
+#         #  "0 a 9 anos",
+#         #  "10 a 19 anos",
+#         #  "20 a 29 anos",
+#         # "30 a 59 anos",
+#         "60+",
+#         Total
+#       ) |>
+#       rename(
+#         "Raça/cor" = ds_raca
+#       ),
+#     "Tabela de proporção de faixa etária por raça/cor de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal, Rio Grande do Norte (2019-2021)",
+#     text_row = TRUE
+#   )
+
+```
+
+
+```{r, include=FALSE}
+# Raça/cor
+g5m_raca<-
+  mortas_g5 |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(
+    ds_raca
+  )
+
+g5m_raca<- 
+  tabela_bonita(
+    g5m_raca,
+    "Raça/cor de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal, Rio Grande do Norte (2019-2021)"                
+  )
+
+
+# idade
+
+g5m_idade<-
+  mortas_g5 |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(
+    faixa_etaria_padrao
+  )
+
+g5m_idade<- 
+  tabela_bonita(
+    g5m_idade,
+    "Faixa etária de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal, Rio Grande do Norte (2019-2021)"                
+  )
+```
+
+
+<p>
+`r g5m_raca` <br>
+`r g5m_idade` <br>
+</p>
+
+#### 5.3 Tempo entre notificação e morte
+
+```{r, include=FALSE}
+
+
+# selecionando as colunas de notificação no SINAN
+g5m_dt_notif_sinan<-
+  mortas_g5|> 
+  select(
+    par_f,
+    banco,
+    dt_ocor,
+    dt_notific
+  ) |> 
+  filter(banco == 'SINAN')
+
+
+```
+
+```{r, include=FALSE}
+
+# selecionando variavies de data de internaçao
+g5m_dt_internacao<-
+  mortas_g5|> 
+  select(
+    par_f,
+    banco,
+    dt_obito
+  ) |> 
+  filter(banco %in% c('SIM'))
+
+
+```
+
+```{r, include=FALSE}
+
+# Diferença entre as datas
+g5m_sinan_hospital <- 
+  inner_join(
+    g5m_dt_notif_sinan, 
+    g5m_dt_internacao, 
+    by = "par_f"
+  ) |> 
+  mutate(
+    tempo_not_ob = dt_obito-dt_notific,
+    tempo_ocor_ob = dt_obito-dt_ocor,
+    tempo_not_ob1 = as.numeric(tempo_not_ob),
+    tempo_ocor_ob1 = as.numeric(tempo_ocor_ob)
+  )
+
+# Resumo estatístico
+g5m_ocor_ob_summary <-
+  summary_days(
+    g5m_sinan_hospital |> 
+      filter(
+        tempo_ocor_ob1 < 180
+      ),
+    tempo_ocor_ob1
+  ) |> 
+  mutate(
+    `Medida resumo` = ifelse(`Medida resumo` == "Hospitalizadas no mesmo dia", "Possível óbito no mesmo dia", `Medida resumo`)
+  )
+
+g5m_ocor_ob_summary <-
+  tabela_bonita(
+    g5m_ocor_ob_summary,
+    "Medidas resumo do tempo entre notificação de violência e o óbito de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal por Faixa Etária e Raça/Cor, Rio Grande do Norte (2019 - 2021)"
+  )
+```
+
+Foram removidos 2 mulheres cujo a diferença entre a ocorrência e o óbito foram maiores que 180 dias. Para esses casos, consideramos que os registros não estavam relacionados. 
+
+
+`r g5m_ocor_ob_summary`
+
+#### 5.4 Causa de óbito
+
+```{r, include=FALSE}
+
+# Tabela com a causa do óbito
+g5m_causa_ob<-
+  tab_1(
+    mortas_g5 |> 
+      filter(
+        banco=="SIM"
+      ),
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "n" = contagem,
+    "CID-10 Resumido" = CIDBR_RESUMIDO_EXTERNAS
+  ) 
+
+g5m_causa_ob<-
+  tabela_bonita(
+    g5m_causa_ob,
+    "Tabela de frequência de causa do óbito de mulheres com registro de óbito (no SIM e/ou por Boletim de Ocorrência letal), com notificação de violência no SINAN e Boletim de Ocorrência por agressão não letal segundo CID-10, Rio Grande do Norte (2019-2021)"
+  )
+
+
+```
+
+`r g5m_causa_ob`
+
+A maior frequência de causa de óbito nesse grupo foi causada agressões (60%), seguida de causas relacionadas ao sistema circulatório.
+
+#### 5.5 SIH -- Internações que teve
+
+```{r, include = FALSE}
+
+mortas_g5 |>
+  select(par_f, banco, ds_sih_diag_sec) |> 
+  filter(banco == "SIH") |> 
+  tab_1(ds_sih_diag_sec)
+
+
+
+```
+
+
+`r g5m_causa_ob`
+
+\pagebreak
+
+## Funções utilizadas
+
+A incorporação de funções em scripts de programação desempenha um papel essencial na organização e na promoção da eficiência na reutilização de código. As funções são segmentos de código que podem ser definidos uma única vez e posteriormente invocados em todo o script, ou mesmo em diferentes projetos, promovendo a modularidade, a clareza e, neste contexto, acelerando o processo de análise. No âmbito deste relatório, três funções principais foram definidas:
+
+***Função "tab_1":*** Esta função tem como finalidade a criação de uma tabela que exibe a frequência e proporção de valores para uma variável específica. O seu uso requer a especificação de dois parâmetros:
+
+**tab_1(nome_do_dataframe, nome_da_coluna)**
+
+Para criar uma tabela de frequência por sexo, basta substituir "nome_do_dataframe" pelo nome do dataframe que contém os dados e "nome_da_coluna" pelo nome da coluna que armazena informações sobre o sexo. Por exemplo:
+
+**tab_1(df_linkage, sg_sexo)**
+
+Esta chamada à função irá gerar uma tabela de frequência e proporção para a variável "sg_sexo" no dataframe "df_linkage".
+
+***Função "tab_2":*** Esta função produz uma tabela de contingência, também a partir de um DataFrame. Ela permite a análise conjunta de duas variáveis, representando a contagem de observações para cada combinação dessas variáveis. A função ainda oferece a opção de calcular as porcentagens em relação às categorias das variáveis, fornecendo uma visão mais detalhada das relações entre essas variáveis. Nesse caso são necessários três parâmetros mínimos:
+
+**tab_2(nome_do_dataframe, variavel_que_vira_linha, variavel_que_vira_coluna)**
+
+Para criar uma tabela de frequência entre as variáveis sexo e faixa-etária, basta substituir "nome_do_dataframe" pelo nome do dataframe que contém os dados , "variavel_que_vira_linha" pelo nome da coluna que armazena informações sobre a faixa-etária e substituir "variavel_que_vira_coluna" pela variável sexo. Por exemplo:
+
+**tab_2(df_linkage, faixa_etaria_padrao, sg_sexo)**
+
+Esse código retornará uma tabela com a contagem de faixa-etária por sexo. Outro parâmetro que pode ser utilizado é o "pct=TRUE". Nesse caso, retornará a mesma estrutura de tabela, porém, dessa vez, com os valores em porcentagem, somando 100% nas colunas. Modo de uso:
+
+**tab_2(df_linkage, faixa_etaria_padrao, sg_sexo, pct=TRUE)**
+
+Assim como o parâmetro anterior, é possível usar o pct_row=TRUE, assim, ao invés da porcentagem ser calculada por culuna, o calculo será realizao por linha, isto é, cada linha somará 100%. A forma de usar é semelhante a anterior, segue exemplo:
+
+**tab_2(df_linkage, faixa_etaria_padrao, sg_sexo, pct_row=TRUE)**
+
+***Função "tabela_bonita":*** Esta é uma função foi desenvolvida para padronizar o modelo visual das tabelas. Para utiliza-la, basta passar a tabela que deseja gerar e o seu respectivo título. Modo de uso:
+
+tabela_bonita(tabela_gerada, "Título da tabela")
+
+Também é possível combinar essas funções, ou seja, é possível armazenar a tabela gerada pela tab_2 e indica--la em "tabela_gerada" e indicar o seu título substituíndo o texto "Título da tabela"
+
+```{r, include=FALSE}
+
+# # Comparação de causas de óbito entre os grupos
+# caus_ob<-function(df){
+#   tab_1(
+#     df |> 
+#       filter(
+#         banco=="SIM"
+#       ) |> 
+#       select(par_f, CIDBR_RESUMIDO_EXTERNAS)
+#     , CIDBR_RESUMIDO_EXTERNAS
+#   )
+# }
+#  
+# 
+# g1m_caus_ob <- caus_ob(mortas_g1)
+# 
+# g2m_caus_ob <- caus_ob(mortas_g2)
+# 
+# g3m_caus_ob <- caus_ob(mortas_g3)
+# 
+# g4m_caus_ob <- caus_ob(mortas_g4)
+# 
+# g5m_caus_ob <- caus_ob(mortas_g5)
+# 
+# causa_ob_tds <-
+#   left_join(g1m_caus_ob, g2m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+#   left_join(g3m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+#   left_join(g4m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS")  |> 
+#   left_join(g5m_caus_ob, by = "CIDBR_RESUMIDO_EXTERNAS") |> 
+#   rename(
+#     'Grupo 1 (n)' = contagem.x,
+#     'Grupo 1 (%)' = `%.x`,
+#     'Grupo 2 (n)' = contagem.y,
+#     'Grupo 2 (%)' = `%.y`,
+#     'Grupo 3 (n)' = contagem.x.x,
+#     'Grupo 3 (%)' = `%.x.x`,
+#     'Grupo 4 (n)' = contagem.y.y,
+#     'Grupo 4 (%)' = `%.y.y`,
+#     'Grupo 5 (n)' = contagem,
+#     'Grupo 5 (%)' = `%`
+#   )
+# 
+# 
+# causa_ob_tds[is.na(causa_ob_tds)] <- 0
+# 
+# causa_ob_tds<-
+#   tabela_bonita(
+#     causa_ob_tds,
+#     'comparação entre os grupo de mulheres que vieram a óbito'
+#   )
+# 
+# 
+# table(mortas_g1$banco, mortas_g1$dt_obito)
+# 
+# a <- as.data.frame(table(mortas_g1$par_f))
+# 
+# b <- mortas_g1 |> 
+#     filter(FL_SIM == 1)
+# 
+# sum(table(b$cd_causabas))
+# 
+# c <- mortas_g1 |> 
+#   filter(!par_f %in% b$par_f)
+# 
+# mortas_g1 |> 
+#   select(par_f) |> 
+#   distinct()
+# 
+# d<- mortas_g1 |> 
+#   filter(is.na(dt_obito)==F) |> 
+#   select(par_f,banco, CIDBR_RESUMIDO_EXTERNAS, dt_obito)
+# 
+# e<- mortas_g3 |> 
+#   filter(!par_f %in% d$par_f)
+# 
+# e |> 
+#   select(par_f) |> 
+#   distinct() |> 
+#   as.list()
+
+```
+
+```{r, include = FALSE}
+
+# # Função para comparar as idades
+# comparacao_idade <- function(df) { 
+#   df  |>  
+#     select(
+#       par_f,
+#       ds_raca, 
+#       faixa_etaria_padrao
+#     ) |> 
+#     distinct() %>%  
+#     tab_1(., 
+#           faixa_etaria_padrao
+#     ) |> 
+#     arrange(faixa_etaria_padrao)
+# }
+# 
+# g1m_fx_et <- comparacao_idade(mortas_g1)
+# g2m_fx_et <- comparacao_idade(mortas_g2)
+# g3m_fx_et <- comparacao_idade(mortas_g3)
+# 
+# 
+# fx_et_tds_ob <-
+#   g1m_fx_et |> 
+#   left_join(g2m_fx_et, by = "faixa_etaria_padrao") |> 
+#   left_join(g3m_fx_et, by = "faixa_etaria_padrao") |> 
+# 
+#   rename(
+#     'Grupo 1 (n)' = contagem.x,
+#     'Grupo 1 (%)' = `%.x`,
+#     'Grupo 2 (n)' = contagem.y,
+#     'Grupo 2 (%)' = `%.y`,
+#     'Grupo 3 (n)' = contagem,
+#     'Grupo 3 (%)' = `%`
+# 
+#   )
+# 
+# fx_et_tds_ob[is.na(fx_et_tds_ob)] <- 0
+
+
+```
+
+```{r, include = FALSE}
+
+# comparacao_raca <- function(df) { 
+#   df  |>  
+#     select(
+#       par_f,
+#       ds_raca, 
+#       faixa_etaria_padrao
+#     ) |> 
+#     distinct() %>%  
+#     tab_1(., 
+#           ds_raca
+#     )
+# }
+# 
+# 
+# g1m_raca <- comparacao_raca(mortas_g1)
+# g2m_raca <- comparacao_raca(mortas_g2)
+# g3m_raca <- comparacao_raca(mortas_g3)
+# g4m_raca <- comparacao_raca(mortas_g4)
+# g5m_raca <- comparacao_raca(mortas_g5)
+# 
+# raca_tds_ob <-
+#   g1m_raca |>
+#   full_join(g2m_raca, by = "ds_raca") |> 
+#   full_join(g3m_raca, by = "ds_raca") |>
+#   full_join(g4m_raca, by = "ds_raca") |>
+#   full_join(g5m_raca, by = "ds_raca") |> 
+#   rename(
+#     'Grupo 1 (n)' = contagem.x,
+#     'Grupo 1 (%)' = `%.x`,
+#     'Grupo 2 (n)' = contagem.y,
+#     'Grupo 2 (%)' = `%.y`,
+#     'Grupo 3 (n)' = contagem.x.x,
+#     'Grupo 3 (%)' = `%.x.x`,
+#     'Grupo 4 (n)' = contagem.y.y,
+#     'Grupo 4 (%)' = `%.y.y`,
+#     'Grupo 5 (n)' = contagem,
+#     'Grupo 5 (%)' = `%`
+#   ) |> 
+#   arrange(ds_raca)
+# 
+# # NA para 0
+# raca_tds_ob[is.na(raca_tds_ob)] <- 0
+
+```

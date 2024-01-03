@@ -1,0 +1,1697 @@
+---
+title: "Violência contra as mulheres: Pareamento de bases de dados para reconstituição de trajetórias"
+subtitle: "Rio Grande do Norte"
+execute:
+  echo: false
+  freeze: true
+knitr:
+  opts_chunk:
+    dpi: 300
+    message: false
+    warning: false
+lang: pt
+toc: true
+self-contained: true
+format:
+  docx: 
+    reference-doc: template.docx
+---
+
+```{r,include=FALSE}
+options(scipen=999)
+
+library(ciTools)
+library(readxl)
+library(tidyverse)
+library(stringr)
+library(stringi)
+library(readstata13)
+library(lubridate)
+library(foreign)
+library(gt)
+library(reshape2)
+library(janitor)
+
+```
+
+```{r, include = FALSE}
+# Carregando a base
+## Erik
+path <- "C:/vitalstrategies/data_sicence/rn_2023/dados"
+
+
+# Oli
+# path <- ""
+# load(paste0(path,"/base_linkada_anon_all_years_14sep2023_final.Rdata"))
+load(paste0(path,"/base_linkada_anon_female_2019_2021_14sep2023_final.Rdata"))
+load(paste0(path,"/icd_map_res.Rdata"))
+```
+
+```{r, include=FALSE} 
+# TABELAS AUXILIARES PARA SINAN
+
+# Encaminhamentos
+enc <- data.frame(categoria=c(
+  "rede_enc_sau", 
+  "assit_soc_creas",
+  "rede_educa",
+  "atend_enc_mulh",
+  "cons_enc_tutela",
+  "cons_ido",
+  "deleg_idos",
+  "dir_human",
+  "mpu_enc_mpu",
+  'deleg_enc_cria',
+  "deleg_enc_mulh",
+  "deleg_enc_deleg", 
+  "infan_enc_juv", 
+  "defen_publ",
+  "Total"),
+  ds_tp_enc=c(
+    "Rede da saúde",
+    "Rede assistência social",
+    "Rede educação",
+    "Rede atendimento à mulher",
+    "Conselho Tutelar",
+    "Conselho do Idoso",
+    "Delegacia de atendimento ao idoso",
+    "centro de referência dos direitos Humanos",
+    "Ministério público",
+    "Delegacia Especializada de Proteção à Criança e Adolescente",
+    "Delegacia de atendimento à mulher",
+    "Outras delegacias",
+    "Justiça da infância e da juventude",
+    "Defensoria pública",
+    "Total"
+  )
+)
+
+
+# Relação com o agressor
+rel <- data.frame(categoria=c(
+  "rel_pai", 
+  "rel_mae",
+  "rel_pad",
+  "rel_mad",
+  "rel_conj",
+  "rel_excon",
+  "rel_namo",
+  "rel_exnam",
+  "rel_filho",
+  "rel_irmao",
+  "rel_conhec",
+  "rel_desco",
+  "rel_cuida",
+  "rel_patrao",
+  "rel_inst",
+  "rel_pol",
+  "rel_propri",
+  "rel_outros",
+  "Total"),
+  ds_tp_rel=c(
+    "Pai",
+    "Mãe",
+    "Padrasto",
+    "Madrasta",
+    "Cônjugue",
+    "Ex-cônjuge",
+    "Namorado(a)",
+    "Ex-namorado(a)",
+    "Filho ou filha",
+    "Irmão ou irmã",
+    "Amigo(s)/Conhecido(s)",
+    "Desconhecido",
+    "Cuidador",
+    "Patrão/Chefe",
+    "Pessoa com relação institucional",
+    "Policial/Agente da lei",
+    "Própria pessoa",
+    "Outro tipo de relação",
+    "Total"
+  )
+)
+
+# Violências
+viol <- data.frame(categoria=c(
+  'viol_fisic', 
+  'viol_psico', 
+  'viol_tort', 
+  'viol_sexu', 
+  'viol_traf', 
+  'viol_finan', 
+  'viol_negli', 
+  'viol_infan', 
+  'viol_legal', 
+  'viol_outr',
+  'Total'),
+  ds_tp_viol=c(
+    'Física', 
+    'Psicológica', 
+    'Tortura', 
+    'Sexual', 
+    'Tráfico de humanos', 
+    'Financeira', 
+    'Negligência', 
+    'trabalho infantil', 
+    'Intervenção legal', 
+    'Outros',
+    'Total')
+)
+
+
+# Procedimentos
+proc <- data.frame(categoria=c(
+  'proc_dst', 
+  'proc_hiv', 
+  'proc_hepb', 
+  'proc_sang', 
+  'proc_semen',
+  'proc_vagin', 
+  'proc_contr', 
+  'proc_abort',
+  'Total'
+),
+ds_tp_proc=c(
+  'IST', 
+  'HIV', 
+  'Hepatite B', 
+  'Coleta de sangue', 
+  'Coleta de sêmen', 
+  'Coleta de secreção vaginal', 
+  'Contracepção de emergência', 
+  'Aborto previsto em lei',
+  'Total')
+)
+
+
+```
+
+
+```{r, include = FALSE}
+#1 Definição de funções auxiliares para análise
+#========================================================================
+# Agrupar pela coluna ds_raca e calcular a contagem e porcentagem de NA em par_f
+tab_1 <- function(df, coluna){
+  
+  df |>
+    dplyr::group_by({{coluna}}) |>
+    dplyr::summarise(contagem = dplyr::n()) |>
+    dplyr::mutate(`%` = round((contagem / nrow(df))*100, 1)) |>
+    dplyr::arrange(-contagem) |>
+    dplyr::bind_rows(
+      df |>
+        dplyr::summarize(
+          {{coluna}} := "Total",
+          contagem = dplyr::n()
+        ) |>
+        dplyr::mutate(`%` = round((contagem / nrow(df)) * 100))
+    )
+  
+}
+## como usar: 
+# raca <- tab_1(vivas_g1, ds_raca)
+
+#=======================================================================
+
+# explicando duas variáveis
+tab_2 <- function(df, var_row, var_col, pct = FALSE, pct_row = FALSE){
+  
+  df <- df |>
+    dplyr::group_by(
+      {{var_row}},
+      {{var_col}}
+    ) |>
+    dplyr::summarise(
+      contagem = dplyr::n(),
+      .groups = 'drop'
+    ) |>
+    tidyr::pivot_wider(
+      names_from = {{var_col}},
+      values_from = c(contagem),
+      values_fill = 0
+    ) |>
+    janitor::adorn_totals("col") |>
+    dplyr::arrange(-Total)
+  
+  if (pct) {
+    df <- df |>
+      dplyr::filter(
+        {{var_row}} != 'Total'
+      ) |>
+      dplyr::mutate(
+        dplyr::across(
+          dplyr::where(is.numeric),
+          ~round((. / sum(.)) * 100, 1)
+        )
+      )
+  }
+  
+  if (pct_row) {
+    df <- df |>
+      dplyr::filter(
+        {{var_row}} != 'Total'
+      ) |>
+      dplyr::mutate(
+        dplyr::across(
+          dplyr::where(is.numeric),
+          ~round((. / Total) * 100, 1)
+        )
+      )
+  }
+  
+  df <- df |> 
+    adorn_totals("row", name = "Total")
+  
+  return(as.data.frame(df))
+}
+
+
+
+## como usar:  
+#tab_2(df_fem, ano, banco, pct=TRUE)
+
+#========================================================================
+
+# Função para criar a tabela bonita
+tabela_bonita <- function(df, titulo, text_row = FALSE){
+  
+  if (text_row) {
+    
+    df[, 1] <- str_to_title(df[, 1])
+    
+  }
+  
+  df |>
+    gt::gt() |>
+    gt::tab_style(
+      style = list(
+        gt::cell_text(
+          align = "center",
+          weight = 'bold',
+        )
+      ),
+      locations = list(
+        gt::cells_title(groups = c("title"))
+      )) |>
+    gt::tab_header(title = titulo)
+  
+}
+
+
+
+## Como usar:
+#tabela_bonita(raca, "teste tabela raça")
+
+#========================================================================
+
+## Funçao para multiplas coluans com categorias iguais
+tab_multi <- function(df, lista, filtro){
+  
+  lista <- as_vector(lista)
+  
+  df |> 
+    filter(banco %in% c(filtro)) |>
+    select(
+      par_f, 
+      lista
+    ) |>
+    pivot_longer(
+      cols = c(lista),
+      names_to = "colunas",
+      values_to = "value"
+    ) |>
+    group_by(
+      colunas,
+      value
+    ) |>
+    summarise(
+      contagem = n(),
+      .groups = 'drop'
+    ) |>
+    pivot_wider(
+      names_from = colunas,
+      values_from = contagem,
+      values_fill = 0
+    ) |>
+    as.data.frame() |>
+    # trecho novo
+    filter(
+      value == 1
+    ) |> 
+    mutate(
+      value = ifelse(
+        value == 1, 
+        "Sim", 
+        "Não"
+      )
+    ) |> 
+    ungroup() |> 
+    pivot_longer(
+      -value,
+      names_to = "categoria",
+      values_to = "n"
+    ) |>
+    select(
+      categoria,
+      n
+    ) |> 
+    mutate(pct = round((n/sum(n)*100),1)) |> 
+    arrange(-n) |> 
+    adorn_totals('row') |> 
+    as.data.frame() 
+}
+
+
+# tab_multi(df_fem, proc, 'SINAN')
+
+#========================================================================
+
+tab_cat_sinan<- function(df,list, col, pct_reg = FALSE, pct_mul = FALSE){
+  
+  # tibble vazia
+  tab_tipo_viol <- tibble()
+  
+  # Transformando a coluna das categorias em lista
+  nomes_violencias <- list |>
+    filter(categoria!='Total') |>
+    select(categoria) |>
+    pull()
+  
+  # Criando coluna de 1
+  df$n_ob <- 1
+  
+  for (i in 1:length(nomes_violencias)){
+    nm <- nomes_violencias[i]
+    f <- as.formula(paste0(nomes_violencias[i], " ~ ", col))
+    tab_enforq <- dcast(
+      df |>
+        filter(banco == 'SINAN'),
+      f, 
+      value.var='n_ob',
+      sum
+    )  |> 
+      adorn_totals("col")
+    # deixando a lista baseado nas categorias anteriores
+    names(tab_enforq) <- 
+      c(paste0('tipo_',deparse(substitute(list))),
+        colnames(tab_enforq |> as.data.frame())[-1])
+    
+    # Criando o nome da coluna dinâmica
+    col_name <- paste0('tipo_', deparse(substitute(list)))
+    
+    tab_enforq <- tab_enforq |> 
+      filter(get(col_name) == 1)  |> 
+      mutate({{col_name}} := nomes_violencias[i])
+    
+    #Juntando os títulos com os dados
+    tab_tipo_viol <- rbind(tab_tipo_viol,tab_enforq)
+    
+  }
+  
+  tab_tipo_viol <- tab_tipo_viol |> as.data.frame() 
+  
+  mapeamento <- unique(list[, c("categoria", colnames(list)[2])])
+  
+  # Substituindo os valores em tab_tipo_viol
+  tab_tipo_viol[[col_name]] <- mapeamento[[colnames(list)[2]]][match(tab_tipo_viol[[col_name]], mapeamento$categoria)]
+  
+  tab_tipo_viol <- tab_tipo_viol |> arrange(-Total)
+  
+  # Seleção das categorias
+  l<-list |> 
+    filter(categoria!='Total') |> 
+    select(categoria)
+  
+  # Linha de quem não tem registros
+  b_pivotado<-
+    df %>%
+    filter(banco == 'SINAN') %>%
+    mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+    filter_at(
+      vars(l$categoria),
+      all_vars(. != 1)
+    ) %>%
+    group_by(get(col)) |> 
+    summarise(n = n()) |> 
+    adorn_totals('row') |> 
+    pivot_wider(
+      names_from = `get(col)`,
+      values_from = n,
+      values_fill = 0
+    ) |>
+    mutate({{col_name}} := case_when(
+      col_name == 'tipo_viol' ~ 'Nenhuma violência registrada',
+      col_name == 'tipo_enc' ~ 'Nenhum encaminhamento',
+      col_name == 'tipo_proc' ~ 'Nenhum procedimento',
+      col_name == 'tipo_rel' ~ 'Nenhum tipo de relacionamento informado',
+      TRUE ~ col_name
+    )) |>
+    as.data.frame()
+  
+  tab_tipo_viol <- bind_rows(tab_tipo_viol, b_pivotado)
+  
+  
+ 
+  #### Linha de registros ####
+  regis <- df %>%
+    filter(banco == 'SINAN') %>%
+    group_by(get(col)) |> 
+    summarise(n = n()) |> 
+    adorn_totals('row') |> 
+    pivot_wider(
+      names_from = `get(col)`,
+      values_from = n,
+      values_fill = 0
+    ) |> 
+    mutate(
+      {{col_name}} := "Número total de registros"
+    ) |> 
+    as.data.frame()
+  
+  
+  tab_tipo_viol<-bind_rows(tab_tipo_viol, regis)
+  tab_tipo_viol[is.na(tab_tipo_viol)] <- 0
+  
+  
+  if (pct_reg) {
+    
+    tab_tipo_viol_a <- tab_tipo_viol |> as.data.frame()
+    # Supondo que '{{col_name}}' seja uma coluna no seu dataframe
+    numerador <- tab_tipo_viol_a %>%
+      filter(get(col_name) != 'Número total de registros') %>%
+      select(-{{col_name}})
+    
+    denominador <- tab_tipo_viol_a %>%
+      filter(get(col_name) == 'Número total de registros') %>%
+      select(-{{col_name}})
+    
+    # Replicando a linha do denominador para ter o mesmo número de linhas que o numerador
+    denominador_replicado <- suppressWarnings(
+      do.call("rbind", 
+              replicate(
+                nrow(numerador), 
+                denominador,
+                simplify = FALSE)
+      )
+    )
+    
+    # Dividindo todas as linhas do numerador pelo denominador replicado
+    result <-  round(numerador / denominador_replicado * 100, 1)
+    
+    # Adicionando a coluna '{{col_name}}' de volta ao resultado
+    result <- cbind(
+      tab_tipo_viol_a %>% 
+        filter(get(col_name) != 'Número total de registros') %>%
+        select({{col_name}}),
+      result)
+    
+    # Convertendo o resultado para um dataframe
+    tab_tipo_viol <- as.data.frame(result)
+  }
+  
+  
+  if (pct_mul) {
+    
+    mulheres <- df %>%
+      filter(banco == 'SINAN') %>%
+      distinct(
+        par_f,
+        ds_raca,
+        faixa_etaria_padrao
+      ) |> 
+    group_by(get(col)) |> 
+      summarise(n = n()) |> 
+      adorn_totals('row') |> 
+      pivot_wider(
+        names_from = `get(col)`,
+        values_from = n,
+        values_fill = 0
+      ) |> 
+      mutate(
+        {{col_name}} := "Número de mulheres"
+      ) |> 
+      as.data.frame()
+    
+    
+    tab_tipo_viol<- tab_tipo_viol |> as.data.frame()
+    numerador <- tab_tipo_viol %>%
+      filter(get(col_name) != 'Número total de registros')
+    
+    tab_tipo_viol<-bind_rows(tab_tipo_viol, mulheres)
+    
+    
+    tab_tipo_viol_a <- tab_tipo_viol |> as.data.frame()
+    # Supondo que '{{col_name}}' seja uma coluna no seu dataframe
+    numerador <- tab_tipo_viol_a %>%
+      filter(get(col_name) != 'Número de mulheres') %>%
+      select(-{{col_name}})
+    
+    denominador <- tab_tipo_viol_a %>%
+      filter(get(col_name) == 'Número de mulheres') %>%
+      select(-{{col_name}})
+    
+    # Replicando a linha do denominador para ter o mesmo número de linhas que o numerador
+    denominador_replicado <- suppressWarnings(
+      do.call("rbind", 
+              replicate(
+                nrow(numerador), 
+                denominador,
+                simplify = FALSE)
+      )
+    )
+    
+    # Dividindo todas as linhas do numerador pelo denominador replicado
+    result <-  round(numerador / denominador_replicado * 100, 1)
+    
+    # Adicionando a coluna '{{col_name}}' de volta ao resultado
+    result <- cbind(
+      tab_tipo_viol_a %>% 
+        filter(get(col_name) != 'Número de mulheres') %>%
+        select({{col_name}}),
+      result)
+    
+    # Convertendo o resultado para um dataframe
+    tab_tipo_viol <- as.data.frame(result)
+    
+    tab_tipo_viol <- tab_tipo_viol |> 
+      filter(get(col_name) != 'Número total de registros')
+  }
+  
+  return(tab_tipo_viol)
+  
+}
+
+# tab_cat_sinan(vivas_g1, viol, 'faixa_etaria_padrao')
+
+#========================================================================
+
+check_missing <- function(data) {
+  
+  # Criação de dataframe expondo valores vazios por coluna - em linha
+  missing_value_df <- data.frame(
+    column_name = names(data),
+    percent_missing = round(colSums(is.na(data)) * 100 / nrow(data), 3)
+  )
+  
+  # Retorna apenas colunas com % de vazios maiores que 0%
+  missing_value_df <- missing_value_df[missing_value_df$percent_missing > 0, ]
+  missing_value_df <- missing_value_df[order(-missing_value_df$percent_missing), ]
+  
+  # Redefine o índice
+  rownames(missing_value_df) <- NULL
+  
+  return(missing_value_df)
+}
+# ==========================================================
+
+#######
+### FUNÇÃO PARA FAZER RESUMO DAS VARIÁVEIS DE DIA
+#######
+summary_days <- function(df, variavel){
+  df |> 
+    distinct() |> 
+    summarise(
+      `Número de observações` = sum(!is.na({{variavel}})),
+      `Média de dias` = round(mean({{variavel}}, na.rm = TRUE), 1),
+      `Menor diferença` = round(min({{variavel}}, na.rm = TRUE), 1),
+      `Maior diferença` = max({{variavel}}, na.rm = TRUE),
+      `1º Quartil` = quantile({{variavel}}, 0.25),
+      `Mediana` = median({{variavel}}, na.rm = TRUE),
+      `3º Quartil` = quantile({{variavel}}, 0.75),
+      `Registros com valores iguais a zero` = sum({{variavel}} == 0, na.rm = TRUE),
+      `Registros com valores negativos` = sum({{variavel}} < 0, na.rm = TRUE),
+      `Registros com valores positivos` = sum({{variavel}} > 0, na.rm = TRUE)
+    ) |>
+    t() |> 
+    as.data.frame() |> 
+    rownames_to_column(var = "Medida resumo") |> 
+    rename(
+      "Valores" = V1
+    )
+}
+
+
+```
+
+```{r, include=FALSE, warning=FALSE}
+
+# novo df para mulheres: df_linkada
+
+df_fem <- 
+  df_linkada_fem_2019_2021_2 |> 
+  dplyr::filter(
+    sg_sexo == "F"
+  )
+
+
+df_fem <-
+  df_fem %>%
+  mutate(
+    rede_enc_sau = case_when((rede_sau=="1" | enc_saude=="1")~1,
+                             T~0),
+    assit_soc_creas = case_when((assist_soc=="1" |enc_creas=="1")~1,
+                                T~0), # abrigo
+    atend_enc_mulh = case_when((atend_mulh=="1" | enc_mulher=="1")~1,
+                               T~0),
+    cons_enc_tutela = case_when((cons_tutel=="1" | enc_tutela=="1")~1,
+                                T~0),
+    mpu_enc_mpu = case_when((mpu=="1" | enc_mpu=="1")~1,
+                            T~0),
+    deleg_enc_cria = case_when((deleg_cria=="1"|enc_dpca=="1")~1,
+                               T~0),
+    deleg_enc_mulh = case_when((deleg_mulh=="1"| enc_deam=="1")~1,
+                               T~0),
+    deleg_enc_deleg = case_when((deleg=="1"|enc_deleg=="1")~1,
+                                T~0),
+    infan_enc_juv = case_when((infan_juv=="1"|enc_vara=="1")~1,
+                              T~0)
+  )
+
+rm(df_linkada_fem_2019_2021_2)
+
+```
+
+
+```{r, include=FALSE}
+
+# 0 no lugar de NA
+df_fem <- df_fem |> 
+  mutate(FL_CAD_UNICO_PESSOA = ifelse(is.na(FL_CAD_UNICO_PESSOA) | FL_CAD_UNICO_PESSOA != 1, 0, FL_CAD_UNICO_PESSOA))
+
+# mulheres com cad unico
+c_cad <- df_fem |> 
+  filter(FL_CAD_UNICO_PESSOA == 1)
+
+# unicas com cad
+
+# mulheres sem cad unico
+s_cad <- df_fem |> 
+  filter(FL_CAD_UNICO_PESSOA != 1)
+
+```
+
+# Mulheres com Cadastro Único pareadas
+## Distribuição por banco de dados
+```{r, include=FALSE}
+
+# Registros por banco c_cad
+reg_banco <- 
+  tab_1(c_cad, banco)  |> 
+  mutate(banco = ifelse(banco == "SESAP", "SESED", banco)) |> 
+  rename(
+    'Banco de dados' = banco,
+    'Registros (n)' = contagem
+  ) |> 
+  select(-`%`)
+
+
+# Mulheres por banco c_cad
+mul_banco <- 
+  c_cad |>
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao,
+    banco
+  ) |> 
+  tab_1(banco)  |> 
+  mutate(banco = ifelse(banco == "SESAP", "SESED", banco)) |> 
+  rename(
+    'Banco de dados' = banco,
+    'Mulheres (n)' = contagem
+  ) |> 
+  select(-`%`) |> 
+  mutate(`Mulheres (n)` = ifelse(
+    `Banco de dados` == "Total",
+    c_cad |> 
+      distinct(par_f) |> 
+      nrow(), 
+    `Mulheres (n)`))
+
+# Join
+mul_banco <- left_join(reg_banco, mul_banco, by = 'Banco de dados')
+
+
+mul_banco <- 
+  tabela_bonita(
+    mul_banco,
+    "Distribuição de registros e de número de mulheres com Cadastro Único por banco de dados da base pareada, Rio Grande do Norte (2019 - 2021)")
+```
+<br>
+`r mul_banco`
+
+## Perfil demográfico
+
+```{r, include=FALSE}
+
+# Idade com cad unico
+c_cad_idade <-
+  c_cad |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# Idade sem cad unico
+s_cad_idade <-
+  s_cad |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+idade_comparada <- left_join(c_cad_idade, s_cad_idade, by="Faixa etária")
+
+# Printando a tabela
+idade_comparada <-
+  tabela_bonita(
+    idade_comparada,
+    "Comparação entre as faixas etárias de mulheres com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r idade_comparada`
+
+```{r, include=FALSE}
+
+# raca com cad unico
+c_cad_raca <-
+  c_cad |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |> 
+  rename(
+    "Raça/cor" = ds_raca,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# raca sem cad unico
+s_cad_raca <-
+  s_cad |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |>
+  rename(
+    "Raça/cor" = ds_raca,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+raca_comparada <- left_join(c_cad_raca, s_cad_raca, by="Raça/cor")
+
+# Printando a tabela
+raca_comparada <-
+  tabela_bonita(
+    raca_comparada,
+    "Comparação entre raça/cor de mulheres com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r raca_comparada`
+# Descritiva por banco de dados
+
+## SINAN
+### Perfil
+```{r, include = FALSE}
+c_cad_sinan <- c_cad |> 
+  filter(banco == "SINAN")
+
+s_cad_sinan <- s_cad |> 
+  filter(banco =='SINAN')
+```
+
+
+```{r, include = FALSE}
+
+# Idade com cad unico
+c_cad_idade_sinan <-
+  c_cad_sinan |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# Idade sem cad unico
+s_cad_idade_sinan <-
+  s_cad_sinan |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+idade_comparada_sinan <- left_join(c_cad_idade_sinan, s_cad_idade_sinan, by="Faixa etária")
+
+# Printando a tabela
+idade_comparada_sinan <-
+  tabela_bonita(
+    idade_comparada_sinan,
+    "Comparação entre as faixas etárias de mulheres no SINAN com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+```
+<br>
+`r idade_comparada_sinan`
+
+```{r, include=FALSE}
+
+# raca com cad unico
+c_cad_raca_sinan <-
+  c_cad_sinan |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |> 
+  rename(
+    "Raça/cor" = ds_raca,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# raca sem cad unico
+s_cad_raca_sinan <-
+  s_cad_sinan |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |>
+  rename(
+    "Raça/cor" = ds_raca,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+raca_comparada_sinan <- left_join(c_cad_raca_sinan, s_cad_raca_sinan, by="Raça/cor")
+
+# Printando a tabela
+raca_comparada_sinan<-
+  tabela_bonita(
+    raca_comparada_sinan,
+    "Comparação entre raça/cor de mulheres no SINAN com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r raca_comparada_sinan`
+
+### Caracterização da violência
+
+```{r, includde=FALSE}
+
+viol_comp <- function(df){ 
+  # número único de mulheres que sofreram viol sexual
+  viol_sex_num <- 
+    df |> 
+    select(
+      par_f,
+      ds_raca,
+      faixa_etaria_padrao
+    ) |> 
+    unique() |> 
+    nrow()
+  
+  # Gerando tabela multi
+  tab_viol <- tab_multi(
+    df, viol[viol$categoria != "Total", ]$categoria, 
+  'SINAN') |>  
+    merge(viol,by="categoria",all.x=T) |> 
+  select(ds_tp_viol,n) |> 
+  mutate(porcentagem = round(n/viol_sex_num*100,1)) |> 
+  rename("Tipo de violência"=ds_tp_viol) |> 
+  arrange(-n)
+  
+  tab_viol_4v <- bind_rows(
+    filter(tab_viol,!`Tipo de violência`=="Total")
+  ) |> 
+    rename(
+      "%" = porcentagem
+    )
+  
+  
+  l<-viol |> 
+    filter(categoria!='Total') |> 
+    select(categoria)
+  
+  # denominador 
+  denominador_viol <- nrow(distinct(df, par_f, ds_raca, faixa_etaria_padrao))
+  # Df com n sem registros
+  s_reg<-
+    df %>%
+    mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+    filter_at(
+      vars(l$categoria),
+      all_vars(. != 1)
+    ) |> 
+    summarise(n = n()) %>%
+    mutate(
+      `%` = round(n / denominador_viol*100,1),
+      `Tipo de violência` = 'Sem registros de violência'
+    )
+  
+  
+  tab_tipo_viol<- bind_rows(tab_viol_4v, s_reg)
+
+  
+  
+  # linha de total de mulheres
+  regis <- df %>%
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  summarise(
+    n = n(),
+    .groups = 'drop'
+  ) |> 
+  mutate(
+    `Tipo de violência` = 'Total de mulheres',
+    `%` = 100
+  ) |> 
+  as.data.frame()
+  
+  tab_tipo_viol<- bind_rows(tab_tipo_viol, regis)
+  
+  tab_tipo_viol
+  
+}
+
+# viol com cadastro
+c_cad_viol <- viol_comp(c_cad_sinan) |> 
+  rename(
+    "Com cad único (n)" = n,
+    "Com cad único (%)" = `%`
+  )
+
+
+
+# viol sem cadastro
+s_cad_viol <- viol_comp(s_cad_sinan) |> 
+  rename(
+    "Sem cad único (n)" = n,
+    "Sem cad único (%)" = `%`
+  )
+
+
+# Add row index to c_cad_viol before the merge
+c_cad_viol$original_order <- seq_len(nrow(c_cad_viol))
+
+# Perform the merge
+result <- merge(c_cad_viol, s_cad_viol, by = 'Tipo de violência', all.x = TRUE)
+
+# Order the result based on the original order
+result <- result[order(result$original_order), ]
+
+# Remove the temporary column
+result$original_order <- NULL
+
+
+cad_viol<-
+  tabela_bonita(
+    result,
+    "Comparação entre mulheres com e sem cadastro único por tipo de violência registrado no SINAN, Rio Grande do Norte (2019 - 2021) "
+  )
+
+
+```
+
+`r cad_viol`
+
+### Encaminhamentos
+```{r, include=FALSE}
+
+enc_comp <- function(df){ 
+  # número único de mulheres que sofreram enc sexual
+  enc_sex_num <- 
+    df |> 
+    select(
+      par_f,
+      ds_raca,
+      faixa_etaria_padrao
+    ) |> 
+    unique() |> 
+    nrow()
+  
+  # Gerando tabela multi
+  tab_enc <- tab_multi(
+    df, enc[enc$categoria != "Total", ]$categoria, 
+  'SINAN') |>  
+    merge(enc,by="categoria",all.x=T) |> 
+  select(ds_tp_enc,n) |> 
+  mutate(porcentagem = round(n/enc_sex_num*100,1)) |> 
+  rename("Tipo de encaminhamento"=ds_tp_enc) |> 
+  arrange(-n)
+  
+  tab_viol_4v <- bind_rows(
+    filter(tab_enc,!`Tipo de encaminhamento`=="Total")
+  ) |> 
+    rename(
+      "%" = porcentagem
+    )
+  
+  
+  l<-enc |> 
+    filter(categoria!='Total') |> 
+    select(categoria)
+  
+  # denominador 
+  denominador_viol <- nrow(distinct(df, par_f, ds_raca, faixa_etaria_padrao))
+  # Df com n sem registros
+  s_reg<-
+    df %>%
+    mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+    filter_at(
+      vars(l$categoria),
+      all_vars(. != 1)
+    ) |> 
+    summarise(n = n()) %>%
+    mutate(
+      `%` = round(n / denominador_viol*100,1),
+      `Tipo de encaminhamento` = 'Sem registros de encaminhamento'
+    )
+  
+  
+  tab_tipo_viol<- bind_rows(tab_viol_4v, s_reg)
+  
+  # linha de total de mulheres
+  regis <- df %>%
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  summarise(
+    n = n(),
+    .groups = 'drop'
+  ) |> 
+  mutate(
+    `Tipo de encaminhamento` = 'Total de mulheres',
+    `%` = 100
+  ) |> 
+  as.data.frame()
+  
+  tab_tipo_enc<- bind_rows(tab_tipo_viol, regis)
+  
+  tab_tipo_enc
+  
+}
+
+
+# viol com cadastro
+c_cad_enc <- enc_comp(c_cad_sinan) |> 
+  rename(
+    "Com cad único (n)" = n,
+    "Com cad único (%)" = `%`
+  )
+# viol sem cadastro
+s_cad_enc <- enc_comp(s_cad_sinan) |> 
+  rename(
+    "Sem cad único (n)" = n,
+    "Sem cad único (%)" = `%`
+  )
+
+
+# Add row index to c_cad_enc before the merge
+c_cad_enc$original_order <- seq_len(nrow(c_cad_enc))
+
+# Perform the merge
+cad_enc <- merge(c_cad_enc, s_cad_enc, by = 'Tipo de encaminhamento', all.x = TRUE)
+
+# Order the result based on the original order
+cad_enc <- cad_enc[order(cad_enc$original_order), ]
+
+# Remove the temporary column
+cad_enc$original_order <- NULL
+
+cad_enc<-
+  tabela_bonita(
+    cad_enc,
+    "Comparação entre mulheres com e sem cadastro único por tipo de encaminhamento registrado no SINAN, Rio Grande do Norte (2019 - 2021) "
+  )
+
+
+```
+
+`r cad_enc`
+
+### Relação com o agressor
+```{r, include=FALSE}
+
+rel_comp <- function(df){ 
+  # número único de mulheres que sofreram rel sexual
+  rel_sex_num <- 
+    df |> 
+    select(
+      par_f,
+      ds_raca,
+      faixa_etaria_padrao
+    ) |> 
+    unique() |> 
+    nrow()
+  
+  # Gerando tabela multi
+  tab_rel <- tab_multi(
+    df, rel[rel$categoria != "Total", ]$categoria, 
+  'SINAN') |>  
+    merge(rel,by="categoria",all.x=T) |> 
+  select(ds_tp_rel,n) |> 
+  mutate(porcentagem = round(n/rel_sex_num*100,1)) |> 
+  rename("Tipo de relação"=ds_tp_rel) |> 
+  arrange(-n)
+  
+  tab_viol_4v <- bind_rows(
+    filter(tab_rel,!`Tipo de relação`=="Total")
+  ) |> 
+    rename(
+      "%" = porcentagem
+    )
+  
+  
+  l<-rel |> 
+    filter(categoria!='Total') |> 
+    select(categoria)
+  
+  # denominador 
+  denominador_viol <- nrow(distinct(df, par_f, ds_raca, faixa_etaria_padrao))
+  # Df com n sem registros
+  s_reg<-
+    df %>%
+    mutate_all(~ ifelse(is.na(.), 0, .)) %>%
+    filter_at(
+      vars(l$categoria),
+      all_vars(. != 1)
+    ) |> 
+    summarise(n = n()) %>%
+    mutate(
+      `%` = round(n / denominador_viol*100,1),
+      `Tipo de relação` = 'Sem registros de relação'
+    )
+  
+  
+  tab_tipo_viol<- bind_rows(tab_viol_4v, s_reg)
+  
+  
+  # linha de total de mulheres
+  regis <- df %>%
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  summarise(
+    n = n(),
+    .groups = 'drop'
+  ) |> 
+  mutate(
+    `Tipo de relação` = 'Total de mulheres',
+    `%` = 100
+  ) |> 
+  as.data.frame()
+  
+  tab_tipo_rel <- bind_rows(tab_tipo_viol, regis)
+  
+  tab_tipo_rel
+  
+}
+
+# viol com cadastro
+c_cad_rel <- rel_comp(c_cad_sinan) |> 
+  rename(
+    "Com cad único (n)" = n,
+    "Com cad único (%)" = `%`
+  )
+# viol sem cadastro
+s_cad_rel <- rel_comp(s_cad_sinan) |> 
+  rename(
+    "Sem cad único (n)" = n,
+    "Sem cad único (%)" = `%`
+    
+  )
+
+# Add row index to c_cad_rel before the merge
+c_cad_rel$original_order <- seq_len(nrow(c_cad_rel))
+
+# Perform the merge
+cad_rel <- merge(c_cad_rel, s_cad_rel, by = 'Tipo de relação', all.x = TRUE)
+
+# Order the result based on the original order
+cad_rel <- cad_rel[order(cad_rel$original_order), ]
+
+# Remove the temporary column
+cad_rel$original_order <- NULL
+
+cad_rel<-
+  tabela_bonita(
+    cad_rel,
+    "Comparação entre mulheres com e sem cadastro único por tipo de relação com o agressor registrado no SINAN, Rio Grande do Norte (2019 - 2021) "
+  )
+
+```
+`r cad_rel`
+
+## SIM
+### Perfil
+```{r, include = FALSE}
+c_cad_sim <- c_cad |> 
+  filter(banco == "SIM")
+
+s_cad_sim <- s_cad |> 
+  filter(banco =='SIM')
+```
+
+
+```{r, include = FALSE}
+
+# Idade com cad unico
+c_cad_idade_sim <-
+  c_cad_sim |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# Idade sem cad unico
+s_cad_idade_sim <-
+  s_cad_sim |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+idade_comparada_sim <- merge(c_cad_idade_sim, s_cad_idade_sim, by="Faixa etária", all = TRUE)
+
+idade_comparada_sim[is.na(idade_comparada_sim)] <- 0
+
+# Printando a tabela
+idade_comparada_sim <-
+  tabela_bonita(
+    idade_comparada_sim,
+    "Comparação entre as faixas etárias de mulheres no SIM com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+```
+`r idade_comparada_sim`
+
+```{r, include=FALSE}
+
+# raca com cad unico
+c_cad_raca_sim <-
+  c_cad_sim |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |> 
+  rename(
+    "Raça/cor" = ds_raca,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# raca sem cad unico
+s_cad_raca_sim <-
+  s_cad_sim |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |>
+  rename(
+    "Raça/cor" = ds_raca,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+raca_comparada_sim <- merge(c_cad_raca_sim, s_cad_raca_sim, by="Raça/cor", all = TRUE) 
+
+raca_comparada_sim[is.na(raca_comparada_sim)] <- 0
+
+# Printando a tabela
+raca_comparada_sim<-
+  tabela_bonita(
+    raca_comparada_sim,
+    "Comparação entre raça/cor de mulheres no SIM com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+<br>
+`r raca_comparada_sim`
+
+### Causa da morte
+```{r, include = FALSE}
+# com cad
+c_cad_ob<-
+  tab_1(
+    c_cad_sim,
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# Sem cad
+s_cad_ob<-
+  tab_1(
+    s_cad_sim,
+    CIDBR_RESUMIDO_EXTERNAS
+  ) |> 
+  rename(
+    "Causa resumida do óbito" = CIDBR_RESUMIDO_EXTERNAS,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# junção
+
+cad_ob <- merge(c_cad_ob, s_cad_ob, by="Causa resumida do óbito", all = TRUE) |> 
+  arrange(-`Com cad único (n)`) |> 
+  filter(`Causa resumida do óbito` != 'Total') |> 
+  adorn_totals('row') |> 
+  as.data.frame()
+
+cad_ob[is.na(cad_ob)] <- 0
+
+cad_ob<-
+  tabela_bonita(
+    cad_ob,
+    "Comparação entre causas de óbito de mulheres com e sem cadastro único registrados no SIM, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+
+`r cad_ob`
+
+## SIH 
+### Perfil
+```{r, include = FALSE}
+c_cad_sih <- c_cad |> 
+  filter(banco == "SIH")
+
+s_cad_sih <- s_cad |> 
+  filter(banco =='SIH')
+```
+
+
+```{r, include = FALSE}
+
+# Idade com cad unico
+c_cad_idade_sih <-
+  c_cad_sih |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# Idade sem cad unico
+s_cad_idade_sih <-
+  s_cad_sih |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(faixa_etaria_padrao) |> 
+  arrange(faixa_etaria_padrao) |> 
+  rename(
+    "Faixa etária" = faixa_etaria_padrao,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+idade_comparada_sih <- merge(c_cad_idade_sih, s_cad_idade_sih, by="Faixa etária")
+
+# Printando a tabela
+idade_comparada_sih <-
+  tabela_bonita(
+    idade_comparada_sih,
+    "Comparação entre as faixas etárias de mulheres no SIH com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+```
+`r idade_comparada_sih`
+
+```{r, include=FALSE}
+
+# raca com cad unico
+c_cad_raca_sih <-
+  c_cad_sih |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |> 
+  rename(
+    "Raça/cor" = ds_raca,
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`
+  )
+
+# raca sem cad unico
+s_cad_raca_sih <-
+  s_cad_sih |> 
+  distinct(
+    par_f,
+    ds_raca,
+    faixa_etaria_padrao
+  ) |> 
+  tab_1(ds_raca) |>
+  rename(
+    "Raça/cor" = ds_raca,
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`
+  )
+
+# juntando as tabelas
+raca_comparada_sih <- merge(c_cad_raca_sih, s_cad_raca_sih, by="Raça/cor", all = TRUE) 
+
+raca_comparada_sih[is.na(raca_comparada_sih)] <- 0
+
+# Printando a tabela
+raca_comparada_sih<-
+  tabela_bonita(
+    raca_comparada_sih,
+    "Comparação entre raça/cor de mulheres no SIH com e sem cadastro único, Rio Grande do Norte (2019-2021)"
+  )
+
+```
+<br>
+`r raca_comparada_sih`
+
+### Internações
+#### Diagnóstico primário
+```{r, include=FALSE}
+
+icd_map_res_pri <- icd_map_res |>
+  rename('ds_sih_causa_pri' = causa_resumida)
+
+# Adicionando a categoria da tabela icd_map_res
+c_cad_sih <- c_cad_sih %>%
+  rename('ICD_10a' = cd_diag_pri) %>%
+  left_join(icd_map_res_pri, by = c("ICD_10a" = "ICD_10"))
+
+# Adicionando a categoria da tabela icd_map_res_pri
+s_cad_sih <- s_cad_sih %>%
+  rename('ICD_10a' = cd_diag_pri) %>%
+  left_join(icd_map_res_pri, by = c("ICD_10a" = "ICD_10"))
+
+
+# Se você quiser realizar a função tab_1() no resultado
+c_cad_cid_pri <- 
+  tab_1(
+    c_cad_sih, 
+    ds_sih_causa_pri
+  ) |> 
+  rename(
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`,
+    "Causa resumida" = ds_sih_causa_pri
+  ) |> 
+  as.data.frame()
+
+
+# Se você quiser realizar a função tab_1() no resultado
+s_cad_cid_pri <- 
+  tab_1(
+    s_cad_sih, 
+    ds_sih_causa_pri
+  ) |> 
+  rename(
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`,
+    "Causa resumida" = ds_sih_causa_pri
+  ) |> 
+  as.data.frame()
+
+causa_pri <- 
+  merge(
+    c_cad_cid_pri,
+    s_cad_cid_pri,
+    by = "Causa resumida",
+    all = TRUE
+  ) |> 
+  arrange(-`Com cad único (n)`) |> 
+  filter(
+    `Causa resumida` != 'Total'
+  ) |> 
+  adorn_totals('row') |> 
+  as.data.frame()
+
+causa_pri[is.na(causa_pri)] <- 0
+
+causa_pri <-
+  tabela_bonita(
+    causa_pri,
+    "Comparação dos números de registros de diagnósticos primários de hospitalização no SIH entre mulheres com e sem cadastro único, Rio Grande do Norte (2019 - 2021)"
+  )
+```
+
+`r causa_pri`
+
+#### Diagnóstico secundário
+```{r, include=FALSE}
+# alteração na coluna e join com auxiliar
+c_cad_sih<- 
+  c_cad_sih |>  
+  rename(ICD_10 = cd_diag_sec_1) |> 
+  left_join(icd_map_res, by = "ICD_10")
+
+# Tabela de cid primária
+c_cad_cid_sec<- 
+  tab_1(
+    c_cad_sih, 
+    causa_resumida
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    "Com cad único (n)" = contagem,
+    "Com cad único (%)" = `%`,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+
+
+## Sem cad unico
+# alteração na coluna e join com auxiliar
+s_cad_sih<- 
+  s_cad_sih |>  
+  rename(ICD_10 = cd_diag_sec_1) |> 
+  left_join(icd_map_res, by = "ICD_10")
+
+# Tabela de cid primária
+s_cad_cid_sec<- 
+  tab_1(
+    s_cad_sih, 
+    causa_resumida
+  ) |> 
+  filter(
+    !is.na(causa_resumida)
+  ) |> 
+  rename(
+    "Sem cad único (n)" = contagem,
+    "Sem cad único (%)" = `%`,
+    "Causa resumida" = causa_resumida
+  ) |> 
+  as.data.frame()
+
+causa_sec <- merge(c_cad_cid_sec, s_cad_cid_sec, by = "Causa resumida", all = TRUE) |> 
+  filter(`Causa resumida` != 'Total') |> 
+  arrange(-`Com cad único (n)`) |> 
+  adorn_totals('row') |> 
+  as.data.frame()
+
+causa_sec[is.na(causa_sec)] <- 0
+
+causa_sec<-
+  tabela_bonita(
+    causa_sec,
+    "Comparação dos números de registros de diagnósticos secundários de hospitalização no SIH entre mulheres com e sem cadastro único, Rio Grande do Norte (2019 - 2021)"
+  )
+
+
+```
+
+`r causa_sec`
+
+
+
+

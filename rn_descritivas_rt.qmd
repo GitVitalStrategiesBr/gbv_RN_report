@@ -1,0 +1,3195 @@
+---
+title: "Descritivas"
+subtitle: "Rio Grande do Norte"
+execute:
+  echo: false
+  freeze: true
+knitr:
+  opts_chunk:
+    dpi: 300
+    message: false
+    warning: false
+lang: pt
+toc: true
+self-contained: true
+format:
+  html:
+    reference-doc: template.docx
+---
+
+# Violência de Gênero no Rio Grande do Norte
+
+A Vital Strategies e a Secretaria de Saúde Pública (SESAP) do Rio Grande do Norte realizaram projeto que teve como objetivo mapear a trajetória de mulheres e meninas vítimas de violência no estado. Com metodologia de pareamento de dados foi possível cruzar registros de uma mesma pessoa nos diferentes sistemas da saúde e da segurança pública e saúde para melhor descrever o cenário da violência contra a mulher no estado e reforçar a importância do tema fornecendo informações relevantes aos tomadores de decisão e equipes envolvidas para evitar agravamento da violência. Entre as bases utilizadas estão: Sistema de Informações de Agravo de Notificação (SINAN \-- violência), Sistema de Informação sobre Mortalidade (SIM), Sistema de Informações Hospitalares (SIH/SUS) e dados dos Boletins De Ocorrência disponibilizados pela SESAP.
+
+## Análises descritivas
+
+```{r, echo=FALSE, include=FALSE}
+# Pacotes
+library(ciTools)
+library(readxl)
+library(tidyverse)
+library(stringr)
+library(stringi)
+library(readstata13)
+library(lubridate)
+library(foreign)
+library(gt)
+library(reshape2)
+library(janitor)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Identificando o path
+
+# Oli
+#path <- "/Users/OlíviaGuaranha/Documents/dados"
+path <- "/Users/renatoteixeira/Library/CloudStorage/Box-Box/Data Science/RN/Relatorio R"
+```
+
+```{r, echo=FALSE}
+# Definindo funções
+
+#========================================================================
+# Agrupar pela coluna ds_raca e calcular a contagem e porcentagem de NA em par_f
+tab_1 <- function(df, coluna, col_nome = NULL) {
+  result <- df %>%
+    dplyr::group_by({{coluna}}) %>%
+    dplyr::summarise(n = dplyr::n()) %>%
+    dplyr::mutate(porcentagem = n / nrow(df)*100) %>%
+    dplyr::arrange(-n) %>%
+    dplyr::bind_rows(
+      df %>%
+        dplyr::summarize(
+          {{coluna}} := "Total Geral",
+          n = dplyr::n()
+        ) %>%
+        dplyr::mutate(porcentagem = n / nrow(df)*100)
+    ) %>% 
+    mutate(porcentagem=round(porcentagem,1))
+  
+  # If col_nome is provided, rename the column and convert to title case
+  if (!is.null(col_nome)) {
+    result <- result %>%
+      dplyr::rename(!!col_nome := {{coluna}}) %>%
+      mutate({{col_nome}} := str_to_title(.data[[col_nome]]))
+  } else {
+    # If col_nome is not provided, only convert to title case
+    result <- result %>%
+      mutate({{coluna}} := str_to_title(.data[[coluna]]))
+  }
+  
+  return(result)
+}
+
+
+## como usar: 
+# raca <- tab_1(df_linkada_all, ds_raca)
+
+
+
+
+
+##Tabela cruzada
+tab_2 <- function(df, var_row, var_col, pct = FALSE){
+  df <- df %>%
+    # mutate(
+    #   {{var_row}} := as.character({{var_row}}),
+    #   {{var_col}} := as.character({{var_col}}),
+    #   {{var_row}} := str_to_title(.data[[var_row]]),
+    #   {{var_col}} := str_to_title(.data[[var_col]])) %>% 
+    dplyr::group_by(
+      {{var_row}},
+      {{var_col}}
+    ) %>%
+    summarise(
+      contagem = n(),
+      .groups = 'drop'
+    ) %>%
+    pivot_wider(
+      names_from = {{var_col}},
+      values_from = c(contagem),
+      values_fill = 0
+    ) %>%
+    adorn_totals(c("col","row"))%>%
+    arrange(-Total)
+  if (pct) {
+    df <- df %>%
+      filter(
+        {{var_row}} != 'Total'
+      ) %>%
+      mutate(
+        across(
+          where(is.numeric),
+          ~round((. / sum(.)) * 100, 1)
+        )
+      ) 
+    # %>%
+    #   adorn_totals("row", name = "Total")
+  }
+    return(as.data.frame(df))
+}
+
+
+#Exemplo
+#tab_sinan_sex <- tab_2(sinan_anon, les_autop, sg_sexo, pct=TRUE)
+
+#=======================================================================
+
+# Função para criar a tabela bonita
+tabela_bonita <- function(df, titulo){ # cols_label  - aprender a usar
+  df%>%
+    gt() %>%
+    tab_style(
+      style = list(
+        cell_text(
+          align = "center",
+          weight = 'bold',
+        )
+      ),
+      locations = list(
+        cells_title(groups = c("title"))
+      )) %>%
+    tab_header(title = titulo)
+}
+
+## Como usar:
+#tab_ano_sinan <- tabela_bonita( tab_ano_sinan, "Número de notificações segundo faixa etária e raça/cor. Rio Grande do Norte, 2010 a 2022")
+#tab_ano_sinan
+
+```
+
+Nesta etapa descritiva, não foi feito qualquer tratamento ou limpeza nas bases de dados e, portanto, os valores aqui apresentados representam os dados integrais das bases analisadas: SIM, SIH e SINAN.
+
+### SINAN
+
+```{r, echo=FALSE, include=FALSE}
+# Carregando a base
+load(paste0(path,"/sinan_raw_anonimizado_09_07_2023.Rdata"))
+
+sinan_anon <- sinan_anon %>% 
+  mutate(faixa_etaria=case_when(cd_idade<4010~"0 a 9 anos",
+                                 cd_idade>4009&cd_idade<4020~"10 a 19 anos",
+                                 cd_idade>4019&cd_idade<4030~"20 a 29 anos",
+                                 cd_idade>4029&cd_idade<4060~"30 a 59 anos",
+                                 cd_idade>4059~"60+",
+                                 T~as.character(cd_idade)),
+         rel_familia=case_when(rel_pai==1|rel_mae==1|rel_pad==1|rel_mad==1|rel_filho==1|rel_irmao==1~"Familia",
+                               T~"Nao"),
+         rel_parc_int=case_when(rel_conj==1|rel_excon==1|rel_namo==1|rel_exnam==1~"Parceiro intimo",
+                                T~"Nao"),
+         rel_conhecidos=case_when(rel_patrao==1|rel_conhec==1|rel_cuida==1~"Conhecidos",
+                              T~"Nao"),
+         rel_outros=case_when(rel_inst==1|rel_pol==1|rel_propri==1|rel_outros==1~"Outros",
+                              T~"Nao"),
+         n_ob=1)
+```
+
+O Sistema de Informações de Agravo de Notificação (SINAN) é uma das principais fontes de dados sobre violência interpessoal no Brasil. Ele é alimentado por informações concedidas por profissionais de saúde que têm a obrigação de notificar casos de pacientes que estão em situação de violência.
+
+```{r, echo=FALSE}
+ntot_sinan <- nrow(sinan_anon)
+ntot_sinan_fem<- nrow(filter(sinan_anon,sg_sexo=="F"))
+ntot_sinan_fem_sem_autolesao<- nrow(filter(sinan_anon,sg_sexo=="F",
+                                           !les_autop==1))
+```
+
+```{r, echo=FALSE}
+# N e % de óbitos por ano e por sexo
+
+# Na base tab_sim_raw_totais o n é 280.221 registros
+
+tab_sinan_serie <- tab_2(sinan_anon,ano,sg_sexo,pct=F)
+
+tab_sinan_serie%>%
+  arrange(ano) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações no SINAN-Violência anuais por sexo.Rio Grande do Norte, 2010-2022") %>%
+  cols_label(ano = "Ano",
+             F = "Feminino",
+             `SEM INFORMACAO` = "Sem informação",
+             M = "Masculino")
+
+```
+
+<h3 style="text-align: center;">
+
+Gráfico 1: Série histórica do número de notificações no SINAN-Violência anuais por sexo.Rio Grande do Norte, 2010-20222
+
+</h3>
+
+```{r, echo=FALSE, include=FALSE}
+#Grafico série histórica
+
+# Filtrando por sexo masculino (M) e feminino (F)
+
+# Plot gráfico de série histórica dos casos notificados por ano e sexo
+fig_sinan_sh <- bind_rows(
+  tab_sinan_serie %>% 
+    select(ano,F) %>% 
+    rename(n=F) %>% 
+    mutate(ds_sexo="Feminino",
+           ano=as.integer(ano)),
+  tab_sinan_serie %>% 
+    select(ano,M) %>% 
+    rename(n=M)%>% 
+    mutate(ds_sexo="Masculino",
+           ano=as.integer(ano))) %>% 
+  filter(ano>2009)
+
+fig_sh_sinan <- ggplot(fig_sinan_sh, aes(x = as.integer(ano), y = n, color = ds_sexo)) +
+  geom_line() +
+  xlab("Ano") +
+  ylab("Casos Notificados") +
+  scale_x_continuous(breaks = seq(2010, 2022, by = 3)) +
+  geom_text(aes(label = n), hjust = -0.2, vjust = 0.5, size = 3)
+```
+
+```{r, echo=FALSE}
+fig_sh_sinan
+```
+
+Ao todo, a base do SINAN contém `r ntot_sinan` registos entre os anos 2007-2022. Com relação à idade das vítimas, observa-se que há maior quantidade de notificações de violência para vítimas entre 10 e 59 anos de idade, período que compreende a adolescência e a vida adulta. A prevalência de notificações por faixa etária é diferente entre os gêneros: entre as mulheres, há mais notificações na faixa entre 30 e 59 anos, e entre os homens prevalece a faixa etária entre 10 e 19 anos.
+
+Isso ocorre, provavelmente, por conta do escopo do sistema, visto que são objetos de notificação: "Caso suspeito ou confirmado de violência doméstica/intrafamiliar, sexual, autoprovocada, tráfico de pessoas, trabalho escravo, trabalho infantil, tortura, intervenção legal e violências homofóbicas contra mulheres e homens em todas as idades. No caso de violência extrafamiliar/comunitária, somente serão objetos de notificação as violências contra crianças, adolescentes, mulheres, pessoas idosas, pessoa com deficiência, indígenas e população LGBT."<sup>[1](#fn1)</sup>.
+
+<a name="fn1">\[1\] Disponível em: https://portalsinan.saude.gov.br/violencia-interpessoal-autoprovocada, acesso em 17 out. 2023.</a>
+
+```{r, echo=FALSE}
+#Número de notificações por sexo e faixa etaria
+
+#N
+
+tab_sinan_serie_fx_sex <- tab_2(sinan_anon,faixa_etaria,sg_sexo,pct=F)
+  
+
+tab_sinan_serie_fx_sex %>%
+  select(-`SEM INFORMACAO`) %>% 
+  arrange(faixa_etaria) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações no SINAN-Violência anuais por faixa etária e sexo.Rio Grande do Norte, 2010-2022") %>%
+  cols_label(faixa_etaria = "Faixa etária",
+             F = "Feminino",
+             M = "Masculino")
+
+
+#Proporção
+tab_sinan_serie_fx_sex <- tab_2(sinan_anon,faixa_etaria,sg_sexo,pct=T)
+  
+
+tab_sinan_serie_fx_sex %>%
+  select(-`SEM INFORMACAO`) %>% 
+  arrange(faixa_etaria) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações no SINAN-Violência anuais por faixa etária e sexo.Rio Grande do Norte, 2010-2022") %>%
+  cols_label(faixa_etaria = "Faixa etária",
+             F = "Feminino",
+             M = "Masculino")
+
+
+
+```
+
+#### Perfil geral das vítimas
+
+```{r,echo=FALSE}
+# Notificações por raça/cor
+
+tab_raca1 <-  tab_2(sinan_anon,ds_raca,sg_sexo,pct=F)
+
+# N e % de notificações por raça/cor
+# Tabela
+tab_raca1 %>%
+  mutate(ds_raca=str_to_title(ds_raca)) %>% 
+  select(-`SEM INFORMACAO`) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por raça/cor segundo sexo. SINAN-Violência, Rio Grande do Norte, 2010-2022")%>%
+  cols_label(ds_raca = "Raça/Cor",
+             F = "Feminino",
+             M = "Masculino")
+
+
+
+tab_raca1 <-  tab_2(sinan_anon,ds_raca,sg_sexo,pct=T)
+
+# N e % de notificações por raça/cor
+# Tabela
+tab_raca1 %>%
+  mutate(ds_raca=str_to_title(ds_raca)) %>% 
+  select(-`SEM INFORMACAO`) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por raça/cor segundo sexo. SINAN-Violência, Rio Grande do Norte, 2010-2022")%>%
+  cols_label(ds_raca = "Raça/Cor",
+             F = "Feminino",
+             M = "Masculino")
+```
+
+#### Perfil da violência
+
+```{r, echo=FALSE}
+#Lesão autoprovocada
+
+sinan_anon <- sinan_anon %>%
+  mutate(ds_les_autop=case_when(les_autop=="1"~"Sim",
+                              les_autop=="2"~"Não",
+                              T~"Indefinido/Não se aplica"))
+
+
+tab_sinan_sex <- tab_2(sinan_anon, ds_les_autop, sg_sexo, pct=F)
+
+tab_sinan_sex <- bind_rows(
+  filter(tab_sinan_sex,!ds_les_autop=="Total"),
+  filter(tab_sinan_sex,ds_les_autop=="Total"),
+)
+
+tab_sinan_sex %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por lesão autoprovocada segundo sexo. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_les_autop = "Lesão autoprovocada",
+             M="Masculino",
+             F="Feminino")
+
+tab_sinan_sex <- tab_2(sinan_anon, ds_les_autop, sg_sexo, pct=T)
+
+tab_sinan_sex <- bind_rows(
+  filter(tab_sinan_sex,!ds_les_autop=="Total"),
+  filter(tab_sinan_sex,ds_les_autop=="Total"),
+)
+
+tab_sinan_sex %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por lesão autoprovocada segundo sexo. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_les_autop = "Lesão autoprovocada",
+             M="Masculino",
+             F="Feminino")
+```
+
+```{r, echo=FALSE}
+
+#Tabelas raça por lesão autoprovocada
+
+
+sinan_anon_f <- sinan_anon %>%
+  filter(sg_sexo=="F") %>% 
+  mutate(fl_ds_les_autop=case_when(les_autop=="1"~"Sim",
+                              T~"Não"))
+#N
+
+tab_sinan_la_race <- tab_2(sinan_anon_f, ds_raca, fl_ds_les_autop, pct=F)
+
+tab_sinan_la_race %>% 
+  mutate(ds_raca=str_to_title(ds_raca)) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por lesão autoprovocada segundo raça/cor. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_raca = "Raça/Cor")
+
+#Proporção
+tab_sinan_la_race <- tab_2(sinan_anon_f, ds_raca, fl_ds_les_autop, pct=T)
+
+tab_sinan_la_race %>% 
+  mutate(ds_raca=str_to_title(ds_raca)) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção das notificações por lesão autoprovocada segundo raça/cor. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_raca = "Raça/Cor")
+```
+
+```{r, echo=FALSE}
+
+##Tabelas por faixa etária e lesao autoprovocada
+#N
+
+tab_sinan_la_fx <- tab_2(sinan_anon_f, faixa_etaria, fl_ds_les_autop, pct=F)
+
+tab_sinan_la_fx %>% 
+  arrange(faixa_etaria) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por lesão autoprovocada segundo faixa etária. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(faixa_etaria = "Faixa etária")
+
+#Proporção
+tab_sinan_la_fx <- tab_2(sinan_anon_f, faixa_etaria, fl_ds_les_autop, pct=T)
+
+tab_sinan_la_fx %>% 
+  arrange(faixa_etaria) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção das notificações por lesão autoprovocada segundo faixa etária. SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(faixa_etaria = "Faixa etária")
+```
+
+```{r, echo=FALSE}
+# Notificações por tipo de violência e faixa etária
+
+##Tipo de violência
+
+
+## Retirando lesão autoprovocada
+
+
+sinan_anon_f <- sinan_anon_f %>% 
+  filter(!les_autop==1)
+# Violências
+viol <- data.frame(tipo_violec=c(
+  'viol_fisic', 
+  'viol_psico', 
+  'viol_tort', 
+  'viol_sexu', 
+  'viol_traf', 
+  'viol_finan', 
+  'viol_negli', 
+  'viol_infan', 
+  'viol_legal', 
+  'viol_outr',
+  'Total'),
+  ds_tp_viol=c(
+  'Física', 
+  'Psicológica', 
+  'Tortura', 
+  'Sexual', 
+  'Tráfico de humanos', 
+  'Financeira', 
+  'Negligência', 
+  'trabalho infantil', 
+  'Intervenção legal', 
+  'Outros',
+  'Total')
+)
+
+tab_tipo_viol <- tibble()
+nomes_violencias <- c("viol_fisic","viol_motiv","viol_psico","viol_tort","viol_sexu","viol_traf","viol_finan","viol_negli","viol_infan","viol_legal","viol_outr")
+sinan_anon_f$n_ob <- 1
+
+for (i in 1:length(nomes_violencias)){
+  nm <- nomes_violencias[i]
+  f <- as.formula(paste(nomes_violencias[i], " ~ faixa_etaria"))
+  tab_enforq <- dcast(sinan_anon_f, f, value.var='n_ob', sum) %>% 
+    adorn_totals("col")
+  names(tab_enforq) <- c("tipo_violec" ,  "0 a 9 anos"  , "10 a 19 anos", "20 a 29 anos", "30 a 59 anos" ,"60+"   ,       "Total")
+  tab_enforq <- tab_enforq %>% 
+    filter(tipo_violec==1) %>% 
+    mutate(tipo_violec=nomes_violencias[i])
+  tab_tipo_viol <- rbind(tab_tipo_viol,tab_enforq)
+  
+}
+
+tab_enforq <- dcast(sinan_anon_f, viol_fisic~faixa_etaria, value.var='n_ob', sum) %>% 
+    adorn_totals("col")
+
+tab_enforq <- tab_enforq %>%
+  adorn_totals("row") %>% 
+  filter(viol_fisic=="Total")
+
+names(tab_enforq) <- c("tipo_violec" ,  "0 a 9 anos"  , "10 a 19 anos", "20 a 29 anos", "30 a 59 anos" ,"60+",
+                       "Total")
+
+
+tab_tip_viol <- bind_rows(tab_tipo_viol,tab_enforq)
+
+tab_tip_viol <- tab_tip_viol %>% 
+  merge(viol,by="tipo_violec",all.x=T) %>% 
+  select(ds_tp_viol ,`0 a 9 anos`  , `10 a 19 anos`, `20 a 29 anos`, `30 a 59 anos` ,`60+`,`Total`) %>% 
+  arrange(-Total)
+
+tab_tip_viol <-  bind_rows(
+  filter(tab_tip_viol,!ds_tp_viol=="Total"),
+  filter(tab_tip_viol,ds_tp_viol=="Total")
+)
+
+
+
+
+tab_tip_viol %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por tipo de violência por faixa etária SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_tp_viol = "Tipo de violência")
+
+
+
+
+```
+
+```{r, echo=FALSE}
+
+tab_tip_viol_p <- tab_tip_viol %>% 
+  filter(!ds_tp_viol=="Total") %>% 
+  select(-ds_tp_viol)
+
+col1_prop <- tab_tip_viol %>% 
+  filter(!ds_tp_viol=="Total") %>% 
+  select(ds_tp_viol)
+
+tab_tip_viol_p_total <- tab_tip_viol %>% 
+  filter(ds_tp_viol=="Total")%>% 
+  select(-ds_tp_viol)
+
+
+
+div <- as.data.frame(round(mapply('/', tab_tip_viol_p, tab_tip_viol_p_total)*100,1 ))
+a <- as.data.frame(tab_tip_viol$ds_tp_viol)
+proportions_df <- bind_cols(col1_prop,div)
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por tipo de violência por faixa etária SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_tp_viol = "Tipo de violência")
+```
+
+```{r, echo=FALSE}
+# Notificações por tipo de violência e raça cor
+
+tab_tipo_viol <- tibble()
+nomes_violencias <- c("viol_fisic","viol_motiv","viol_psico","viol_tort","viol_sexu","viol_traf","viol_finan","viol_negli","viol_infan","viol_legal","viol_outr")
+
+for (i in 1:length(nomes_violencias)){
+  nm <- nomes_violencias[i]
+  f <- as.formula(paste(nomes_violencias[i], " ~ ds_raca"))
+  tab_enforq <- dcast(sinan_anon_f, f, value.var='n_ob', sum) %>% 
+    adorn_totals("col")
+  
+  names(tab_enforq) <- c("tipo_violec" ,str_to_title(names(tab_enforq)[-1]))
+  tab_enforq <- tab_enforq %>% 
+    filter(tipo_violec==1) %>% 
+    mutate(tipo_violec=nomes_violencias[i])
+  tab_tipo_viol <- rbind(tab_tipo_viol,tab_enforq)
+  
+}
+
+tab_enforq <- dcast(sinan_anon_f, viol_fisic~ds_raca, value.var='n_ob', sum) %>% 
+    adorn_totals("col")
+
+tab_enforq <- tab_enforq %>%
+  adorn_totals("row") %>% 
+  filter(viol_fisic=="Total")
+
+names(tab_enforq) <- c("tipo_violec" ,str_to_title(names(tab_enforq)[-1]))
+
+
+tab_tip_viol <- bind_rows(tab_tipo_viol,tab_enforq)
+
+tab_tip_viol <- tab_tip_viol %>% 
+  merge(viol,by="tipo_violec",all.x=T) %>% 
+  select(ds_tp_viol ,c(str_to_title(names(tab_enforq)[-1]))) %>% 
+  arrange(-Total)
+
+tab_tip_viol <-  bind_rows(
+  filter(tab_tip_viol,!ds_tp_viol=="Total"),
+  filter(tab_tip_viol,ds_tp_viol=="Total")
+)
+
+
+
+
+tab_tip_viol %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por tipo de violência por raça/cor SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_tp_viol = "Tipo de violência")
+```
+
+```{r, echo=FALSE}
+
+tab_tip_viol_p <- tab_tip_viol %>% 
+  filter(!ds_tp_viol=="Total") %>% 
+  select(-ds_tp_viol)
+
+col1_prop <- tab_tip_viol %>% 
+  filter(!ds_tp_viol=="Total") %>% 
+  select(ds_tp_viol)
+
+tab_tip_viol_p_total <- tab_tip_viol %>% 
+  filter(ds_tp_viol=="Total")%>% 
+  select(-ds_tp_viol)
+
+
+
+div <- as.data.frame(round(mapply('/', tab_tip_viol_p, tab_tip_viol_p_total)*100,1 ))
+
+proportions_df <- bind_cols(col1_prop,div)
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por tipo de violência por raça/cor SINAN-Violência, Rio Grande do Norte, 2010-2022)") %>%
+  cols_label(ds_tp_viol = "Tipo de violência")
+```
+
+##Relação com agressor
+
+```{r,echo=FALSE}
+# Relação com o agressor por sexo
+sinan_anon$n_ob <- 1
+
+
+sinan_anon_sem_lesauto <- sinan_anon %>% 
+  filter(!les_autop==1)
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto, rel_familia~sg_sexo, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_familia) %>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+
+tab_rel <- tab_rel_fam
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto, rel_parc_int~sg_sexo, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_parc_int)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto, rel_conhecidos~sg_sexo, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_conhecidos)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto, rel_outros~sg_sexo, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_outros)%>% 
+  filter(!relacao_vitima%in%c("Nao"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam) %>% 
+  select(-`SEM INFORMACAO`)
+
+tab_rel %>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por relação com agressor por sexo da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(relacao_vitima = "Relação com a vítima",
+             F="Feminino",
+             M="Masculino")
+
+##Proporcao
+tab_rel_tot <- tab_rel %>% 
+  filter(relacao_vitima=="Total") %>% 
+  select(-relacao_vitima)
+
+tab_rel <- tab_rel %>% 
+  filter(!relacao_vitima=="Total")
+
+
+numeric_cols <- tab_rel[, !names(tab_rel) %in% c("relacao_vitima")]
+
+proportions <- as.data.frame(round(mapply('/', numeric_cols, tab_rel_tot)*100,1 ))
+
+proportions_df <- data.frame(
+  relacao_vitima = tab_rel$relacao_vitima,
+  proportions
+)
+
+names(proportions_df) <- names(tab_rel)
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por relação com agressor por sexo da vítima. Rio Grande do Norte, 2010-2022")  %>%
+  cols_label(relacao_vitima = "Relação com a vítima",
+             F="Feminino",
+             M="Masculino")
+
+```
+
+```{r,echo=FALSE}
+# Relação com o agressor por idade
+
+# Filtro do sexo feminino
+sinan_anon_sem_lesauto_f <- sinan_anon_sem_lesauto %>% 
+  filter(sg_sexo=="F")
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_familia~faixa_etaria, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_familia) %>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- tab_rel_fam
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_parc_int~faixa_etaria, value.var='n_ob', sum) 
+
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_parc_int)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_conhecidos~faixa_etaria, value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_conhecidos)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_outros~faixa_etaria, value.var='n_ob', sum) 
+
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_outros)%>% 
+  filter(!relacao_vitima%in%c("Nao"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+tab_rel %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por relação com agressor por faixa etária. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(relacao_vitima = "Relação com a vítima")
+
+##Proporcao
+# Extract numeric columns (excluding 'Category' and 'Total')
+tab_rel_tot <- tab_rel %>% 
+  filter(relacao_vitima=="Total") %>% 
+  select(-relacao_vitima)
+
+tab_rel <- tab_rel %>% 
+  filter(!relacao_vitima=="Total")
+
+
+numeric_cols <- tab_rel[, !names(tab_rel) %in% c("relacao_vitima")]
+
+proportions <- as.data.frame(round(mapply('/', numeric_cols, tab_rel_tot)*100,1 ))
+
+proportions_df <- data.frame(
+  relacao_vitima = tab_rel$relacao_vitima,
+  proportions
+)
+
+names(proportions_df) <- names(tab_rel)
+
+
+# Create a new dataframe with proportions
+proportions_df <- data.frame(
+  relacao_vitima = tab_rel$relacao_vitima,
+  proportions
+)
+
+names(proportions_df) <- names(tab_rel)
+
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por relação com agressor por faixa etária. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(relacao_vitima = "Relação com a vítima")
+
+
+```
+
+```{r,echo=FALSE}
+# Relação com o agressor por raça/cor para mulheres
+#Para o total substiruir sinan_anon_sem_lesauto_f por sinan_anon
+
+#FIltrando sem lesão autoprovocada
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f %>% 
+                       filter(sg_sexo=="F"),
+                     rel_familia~str_to_title(ds_raca), value.var='n_ob', sum) 
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_familia) %>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+
+tab_rel <- tab_rel_fam
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_parc_int~str_to_title(ds_raca), value.var='n_ob', sum) 
+
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_parc_int)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_conhecidos~str_to_title(ds_raca), value.var='n_ob', sum) 
+
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_conhecidos)%>% 
+  filter(!relacao_vitima%in%c("Nao","Total"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+
+tab_rel_fam <- dcast(sinan_anon_sem_lesauto_f, rel_outros~str_to_title(ds_raca), value.var='n_ob', sum) 
+
+tab_rel_fam <- tab_rel_fam %>%  
+  adorn_totals("row") %>%  
+  adorn_totals("col") %>%  
+  rename(relacao_vitima=rel_outros)%>% 
+  filter(!relacao_vitima%in%c("Nao"))
+
+tab_rel <- rbind(tab_rel,tab_rel_fam)
+
+tab_rel %>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por relação com agressor por raça/cor da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(relacao_vitima = "Relação com a vítima")
+
+##Proporcao
+
+
+tab_rel_p <- tab_rel %>% 
+  filter(!relacao_vitima=="Total") %>% 
+  select(-relacao_vitima)
+
+col1_prop <- tab_rel %>% 
+  filter(!relacao_vitima=="Total") %>% 
+  select(relacao_vitima)
+
+tab_rel_p_total <- tab_rel_fam %>% 
+  filter(relacao_vitima=="Total")%>% 
+  select(-relacao_vitima)
+
+
+
+div <- as.data.frame(round(mapply('/', tab_rel_p, tab_rel_p_total)*100,1 ))
+
+proportions_df <- bind_cols(col1_prop,div)
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por relação com agressor por sexo da vítima. Rio Grande do Norte, 2010-2022")  %>%
+  cols_label(relacao_vitima = "Relação com a vítima")
+
+
+
+
+```
+
+```{r,echo=FALSE}
+#Meio de agressão por faixa etaria
+
+tab_tipo_agress <- tibble()
+nomes_agressa <- c("ag_forca", "ag_enfor","ag_objeto","ag_corte", "ag_quente","ag_enven", "ag_fogo","ag_ameaca","ag_outros")
+
+for (i in 1:length(nomes_agressa)){
+  nm <- nomes_agressa[i]
+  f <- as.formula(paste(nomes_agressa[i], " ~ faixa_etaria"))
+  tab_enforq <- dcast(sinan_anon_sem_lesauto_f, f, value.var='n_ob', sum) %>% 
+    adorn_totals("row") %>%  
+    adorn_totals("col")
+  names(tab_enforq) <- c("tipo_agressao" ,  "0 a 9 anos"  , "10 a 19 anos", "20 a 29 anos", "30 a 59 anos" ,"60+"   ,       "Total")
+  tab_enforq <- tab_enforq %>% 
+    filter(tipo_agressao==1) %>% 
+    mutate(tipo_agressao=nomes_agressa[i])
+  tab_tipo_agress <- rbind(tab_tipo_agress,tab_enforq)
+  
+}
+
+tab_enforq <- dcast(sinan_anon_sem_lesauto_f, ag_forca~faixa_etaria, value.var='n_ob', sum) %>% 
+  adorn_totals("row") %>%  
+  adorn_totals("col")
+
+tab_enforq <- tab_enforq %>%
+  filter(ag_forca=="Total")
+
+names(tab_enforq) <- c("tipo_agressao" ,  "0 a 9 anos"  , "10 a 19 anos", "20 a 29 anos", "30 a 59 anos" ,"60+"   ,       "Total")
+
+tab_tipo_agress <- bind_rows(tab_tipo_agress,tab_enforq)
+
+agressao_label <- data.frame(tipo_agressao=c("ag_forca", "ag_enfor","ag_objeto","ag_corte", "ag_quente","ag_enven", "ag_fogo","ag_ameaca","ag_outros","Total"),
+                             agressao_label=c("Força corporal/espancamento", "Enforcamento","Objeto contundente","Objeto perfuro-cortante", "Substancia/objeto quente","Envenenamento", "Arma de fogo","Ameaça","Outro","Total"))
+
+tab_tipo_agress_f <- merge(tab_tipo_agress,agressao_label,by="tipo_agressao",all.x=T)
+
+
+tab_tipo_agress_f <- tab_tipo_agress_f %>% 
+  select(8,2:7)
+
+
+
+tab_tipo_agress_f %>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por meio meio de agressão segundo faixa etária da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(agressao_label = "Meio de agressão")
+
+
+```
+
+```{r,echo=FALSE}
+##Proporcao
+# Extract numeric columns (excluding 'Category' and 'Total')
+tab_agress_p_total <- tab_tipo_agress_f %>% 
+  filter(agressao_label=="Total")%>% 
+  select(-agressao_label)
+
+
+tab_tipo_agress_f <- tab_tipo_agress_f %>% 
+  filter(!agressao_label=="Total") %>% 
+  arrange(-Total)
+
+numeric_cols <- tab_tipo_agress_f[, !names(tab_tipo_agress_f) %in% c("agressao_label")]
+
+proportions <- as.data.frame(round(mapply('/', numeric_cols, tab_agress_p_total)*100,1 ))
+
+# Create a new dataframe with proportions
+proportions_df <- data.frame(
+  agressao_label = tab_tipo_agress_f$agressao_label,
+  proportions
+)
+
+names(proportions_df) <- names(tab_tipo_agress)
+
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por meio meio de agressão segundo faixa etária da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(tipo_agressao = "Meio de agressão")
+```
+
+```{r,echo=FALSE}
+
+#Meio de agressão por raça cor
+
+tab_tipo_agress <- tibble()
+nomes_agressa <- c("ag_forca", "ag_enfor","ag_objeto","ag_corte", "ag_quente","ag_enven", "ag_fogo","ag_ameaca","ag_outros")
+
+for (i in 1:length(nomes_agressa)){
+  nm <- nomes_agressa[i]
+  f <- as.formula(paste(nomes_agressa[i], " ~ str_to_title(ds_raca)"))
+  tab_enforq <- dcast(sinan_anon_sem_lesauto_f, f, value.var='n_ob', sum) %>% 
+    adorn_totals("row") %>%  
+    adorn_totals("col")
+  names(tab_enforq) <- c("tipo_agressao" ,  "Amarela","Branca","Ignorada","Indigena","Parda","Preta","Total")
+  tab_enforq <- tab_enforq %>% 
+    dplyr::filter(tipo_agressao=="1") %>% 
+    mutate(tipo_agressao=nomes_agressa[i])
+  tab_tipo_agress <- rbind(tab_tipo_agress,tab_enforq)
+  
+}
+
+tab_enforq <- dcast(sinan_anon_sem_lesauto_f, ag_forca~str_to_title(ds_raca), value.var='n_ob', sum) %>% 
+  adorn_totals("row") %>%  
+  adorn_totals("col")
+
+tab_enforq <- tab_enforq %>%
+  filter(ag_forca=="Total")
+
+names(tab_enforq) <- c("tipo_agressao" ,  "Amarela","Branca","Ignorada","Indigena","Parda","Preta","Total")
+
+tab_tipo_agress <- bind_rows(tab_tipo_agress,tab_enforq)
+
+
+agressao_label <- data.frame(tipo_agressao=c("ag_forca", "ag_enfor","ag_objeto","ag_corte", "ag_quente","ag_enven", "ag_fogo","ag_ameaca","ag_outros","Total"),
+                             agressao_label=c("Força corporal/espancamento", "Enforcamento","Objeto contundente","Objeto perfuro-cortante", "Substancia/objeto quente","Envenenamento", "Arma de fogo","Ameaça","Outro","Total"))
+
+tab_tipo_agress_f <- merge(tab_tipo_agress,agressao_label,by="tipo_agressao",all.x=T)
+
+
+tab_tipo_agress_f <- tab_tipo_agress_f %>% 
+  select(9,2:8)
+
+tab_tipo_agress_f %>%
+  arrange(Total) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por meio meio de agressão segundo raça/cor da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(agressao_label = "Meio de agressão")
+
+
+```
+
+```{r}
+##Proporcao
+##Proporcao
+# Extract numeric columns (excluding 'Category' and 'Total')
+tab_agress_p_total <- tab_tipo_agress_f %>% 
+  filter(agressao_label=="Total")%>% 
+  select(-agressao_label)
+
+
+tab_tipo_agress_f <- tab_tipo_agress_f %>% 
+  filter(!agressao_label=="Total") %>% 
+  arrange(-Total)
+
+numeric_cols <- tab_tipo_agress_f[, !names(tab_tipo_agress_f) %in% c("agressao_label")]
+
+proportions <- as.data.frame(round(mapply('/', numeric_cols, tab_agress_p_total)*100,1 ))
+
+# Create a new dataframe with proportions
+proportions_df <- data.frame(
+  agressao_label = tab_tipo_agress_f$agressao_label,
+  proportions
+)
+
+names(proportions_df) <- names(tab_tipo_agress)
+
+proportions_df %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de notificações por meio meio de agressão segundo raça/cor da vítima. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(tipo_agressao = "Meio de agressão")
+```
+
+#### Municípios críticos e unidades notificadoras
+
+O município com a maior quantidade de notificações de violência é Natal, seguido pelos municípios de Mossoró e Parnamirim. Quanto aos municípios com menores quantidades de notificação identificam-se: Antônio Martins, Francisco Dantas, Galinhos, Itaú, João Dias, Lagoa Salgada, Luís Gomes, Marcelino Vieira, Martins, Olho-d'Água do Borges, Rafael Fernandes, Riacho da Cruz e Tenente Ananias, todos com apenas 1 notificação no período.
+
+```{r,echo=FALSE}
+# Notificações por município
+
+# Carregando dados com nome e código IBGE dos municípios do RN
+cd_mun_rn <- read_xlsx(paste0(path,"/cd_mun_rn.xlsx"))
+
+# Merge entre SINAN e base com códigos IBGE
+sinan_munic <- merge(sinan_anon,cd_mun_rn, by.x="cd_mun_not", by.y="CodMun_IBGE", all.x= T)
+
+# Calculando a tabela com n e % de notificações por município
+
+sinan_munic1 <- sinan_munic %>%
+  group_by(Mun) %>% 
+  summarise(contagem = n()) %>%
+  mutate(perc = round(contagem / ntot_sinan * 100, 1),
+         Mun = case_when(perc < 2 ~ "Outros", TRUE ~ as.character(Mun))) %>%
+  ungroup() %>% 
+  group_by(Mun) %>% 
+  summarise(n = sum(contagem, na.rm = TRUE),
+            Porcentagem = sum(perc, na.rm = TRUE)) %>%
+  adorn_totals("row") %>% 
+  arrange(-Porcentagem)
+
+sinan_munic1 <- 
+  bind_rows(
+    sinan_munic1 %>%  
+      filter(!Mun%in%c("Total","Outros")),
+    sinan_munic1 %>%  
+      filter(Mun == "Outros"),
+  sinan_munic1 %>%  
+      filter(Mun == "Total")
+  )
+
+sinan_munic1 <- sinan_munic1 %>%
+  mutate(Porcentagem=case_when(Mun=="Total"~100.0,
+                               T~Porcentagem))
+# Formatando a tabela
+
+sinan_munic1 %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por Município de notificação do RN (SINAN, 2010-2022)") %>%
+  cols_label(Mun = "Município de Notificação")
+
+```
+
+
+```{r}
+## SEXO FEMININO
+# Calculando a tabela com n e % de notificações por município
+# Merge entre SINAN e base com códigos IBGE
+sinan_munic <- merge(filter(sinan_anon,sg_sexo=="F"),cd_mun_rn, by.x="cd_mun_not", by.y="CodMun_IBGE", all.x= T)
+
+
+sinan_munic1 <- sinan_munic %>%
+  group_by(Mun) %>% 
+  summarise(contagem = n()) %>%
+  mutate(perc = round(contagem / ntot_sinan * 100, 1),
+         Mun = case_when(perc < 0.99 ~ "Outros", TRUE ~ as.character(Mun))) %>%
+  ungroup() %>% 
+  group_by(Mun) %>% 
+  summarise(n = sum(contagem, na.rm = TRUE),
+            Porcentagem = sum(perc, na.rm = TRUE)) %>%
+  adorn_totals("row") %>% 
+  arrange(-Porcentagem)
+
+sinan_munic1 <- 
+  bind_rows(
+    sinan_munic1 %>%  
+      filter(!Mun%in%c("Total","Outros")),
+    sinan_munic1 %>%  
+      filter(Mun == "Outros"),
+  sinan_munic1 %>%  
+      filter(Mun == "Total")
+  )
+
+sinan_munic1 <- sinan_munic1 %>%
+  mutate(Porcentagem=case_when(Mun=="Total"~100.0,
+                               T~Porcentagem))
+# Formatando a tabela
+
+sinan_munic1 %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações, do sexo feminino, por Município de notificação do RN (SINAN, 2010-2022)") %>%
+  cols_label(Mun = "Município de Notificação")
+
+```
+
+
+
+#### Taxa de notificação nos municípios
+
+```{r,echo=FALSE,include=FALSE}
+
+###Ambos os sexos
+
+#Populacao
+# pop <- read.dbf("/Users/renatoteixeira/Library/CloudStorage/OneDrive-UniversidadeFederaldeMinasGerais/População/MS Datasus/2000 a 2021/POP_2000a2021_idade_pontual.dbf")
+# 
+# pop <- pop %>%
+#   filter(ANO>2009) %>%
+#   mutate(faixa_etaria=case_when(as.integer(IDADE)<10~"0 a 9 anos",
+#                                 as.integer(IDADE)>09&as.integer(IDADE)<20~"10 a 19 anos",
+#                                 as.integer(IDADE)>19&as.integer(IDADE)<30~"20 a 29 anos",
+#                                 as.integer(IDADE)>29&as.integer(IDADE)<60~"30 a 59 anos",
+#                                 as.integer(IDADE)>59~"60+"),
+#          SG_SEXO=case_when(SEXO==1~"M",
+#                            SEXO==2~"F"),
+#          UF=substr(COD_MUN,1,2)
+#          )
+# 
+# pop <- pop %>%
+#   group_by(ANO,COD_MUN,faixa_etaria,SG_SEXO,UF) %>%
+#   summarise(POP=sum(POP))
+# 
+# pop_total <- pop %>%
+#   group_by(ANO,COD_MUN,SG_SEXO,UF) %>%
+#   summarise(POP=sum(POP))
+# 
+# save(pop_total,file = "/Users/renatoteixeira/Library/CloudStorage/Box-Box/Data Science/RN/Relatorio R/pop_total_mun_2015_2021_MS_tabnet.Rdata")
+
+load(paste0(path,"/pop_total_mun_2015_2021_MS_tabnet.Rdata"))
+
+pop_total <- pop_total %>%
+  group_by(ANO,COD_MUN) %>%
+  summarise(POP=sum(POP))
+
+
+tab_tx_not_mun <- sinan_anon %>% 
+  group_by(cd_mun_not,ano) %>% 
+  summarise(n=n())
+
+tab_tx_not_mun <- merge(tab_tx_not_mun,pop_total,by.y=c("COD_MUN","ANO"),by.x=c("cd_mun_not","ano"),all.x=T)
+
+tab_tx_not_mun <- merge(tab_tx_not_mun,select(cd_mun_rn,CDG_tabwin,Mun),by.y=c("CDG_tabwin"),by.x=c("cd_mun_not"),all.x=T)
+
+tab_tx_not_mun <- tab_tx_not_mun %>% 
+  mutate(tx_notific=round(n/POP*100000,1))
+
+```
+
+```{r, echo=FALSE}
+# N e % de óbitos por ano e por sexo
+
+# Na base tab_sim_raw_totais o n é 280.221 registros
+
+tab_tx_not_mun_f <- tab_tx_not_mun %>% 
+  select(Mun,tx_notific,ano) %>% 
+  spread(key=ano,valu=round(tx_notific,1)) %>% 
+  select(-`2007`,-`2008`,-`2009`,-`2022`) %>% 
+  arrange(-`2021`) %>% 
+  filter(`2021`>99)
+
+
+tab_tx_not_mun_f[is.na(tab_tx_not_mun_f)] <- 0
+
+tab_tx_not_mun_f%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Taxa de notificação (x 100,000 habitantes) no SINAN-Violência por município (maiores que 99).Rio Grande do Norte, 2010-2022") %>%
+  cols_label(Mun = "Município de Notificação")
+```
+
+
+```{r,echo=FALSE,include=FALSE}
+# SEXO FEMININO
+
+load(paste0(path,"/pop_total_mun_2015_2021_MS_tabnet.Rdata"))
+
+pop_total_fem <- pop_total %>%
+  filter(SG_SEXO=="F") %>% 
+  group_by(ANO,COD_MUN) %>%
+  summarise(POP=sum(POP))
+
+
+tab_tx_not_mun <- sinan_anon %>% 
+  filter(sg_sexo=="F") %>% 
+  group_by(cd_mun_not,ano) %>% 
+  summarise(n=n())
+
+tab_tx_not_mun <- merge(tab_tx_not_mun,pop_total_fem,by.y=c("COD_MUN","ANO"),by.x=c("cd_mun_not","ano"),all.x=T)
+
+tab_tx_not_mun <- merge(tab_tx_not_mun,select(cd_mun_rn,CDG_tabwin,Mun),by.y=c("CDG_tabwin"),by.x=c("cd_mun_not"),all.x=T)
+
+tab_tx_not_mun <- tab_tx_not_mun %>% 
+  mutate(tx_notific=round(n/POP*100000,1))
+
+```
+
+```{r, echo=FALSE}
+# N e % de óbitos por ano e por sexo
+
+# Na base tab_sim_raw_totais o n é 280.221 registros
+
+tab_tx_not_mun_fem <- tab_tx_not_mun %>% 
+  select(Mun,tx_notific,ano) %>% 
+  spread(key=ano,valu=round(tx_notific,1)) %>% 
+  select(-`2007`,-`2008`,-`2009`,-`2022`) %>% 
+  arrange(-`2021`) %>% 
+  filter(`2021`>99)
+
+
+tab_tx_not_mun_fem[is.na(tab_tx_not_mun_fem)] <- 0
+
+tab_tx_not_mun_f%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Taxa de notificação (x 100,000 habitantes), sexo feminino, no SINAN-Violência por município (maiores que 99).Rio Grande do Norte, 2010-2022") %>%
+  cols_label(Mun = "Município de Notificação")
+```
+
+Com relação às principais unidades notificadoras ...
+
+```{r,echo=FALSE}
+# Notificações por unidades notificadoras
+# sinan_uni_not <- sinan_anon %>% 
+#   group_by(cd_cnes_unid_not) %>% 
+#   summarise(contagem = n()) %>%
+#   mutate(perc = round(contagem/ntot_sinan * 100,3),
+#          cd_cnes_unid_not = case_when(perc < 2 ~ "Outras unidades", TRUE ~ as.character(cd_cnes_unid_not))) %>%
+#   ungroup() %>% 
+#   group_by(cd_cnes_unid_not) %>% 
+#   summarise(n = sum(contagem, na.rm = TRUE),
+#             Porcentagem = sum(perc, na.rm = TRUE)) %>%
+#   adorn_totals("row") %>% 
+#   arrange(-Porcentagem)
+#   
+# 
+# sinan_uni_not <- 
+#   bind_rows(
+#     sinan_uni_not %>%  
+#       filter(!cd_cnes_unid_not%in%c("Total","Outras unidades")),
+#     sinan_uni_not %>%  
+#       filter(cd_cnes_unid_not == "Outras unidades"),
+#   sinan_uni_not %>%  
+#       filter(cd_cnes_unid_not == "Total")
+#   )
+# 
+# sinan_uni_not <- sinan_uni_not %>%
+#   mutate(Porcentagem=case_when(cd_cnes_unid_not=="Total"~100.0,
+#                                T~Porcentagem))
+# # Formatando a tabela
+# 
+# sinan_uni_not %>% 
+#   gt() %>%
+#   tab_style(
+#     style = list(
+#       cell_text(
+#         align = "center",
+#         weight = 'bold',
+#       )
+#     ),
+#     locations = list(
+#       cells_title(groups = c("title"))
+#     )) %>% 
+#   tab_header(title = "Número de notificações por Unidade Notificadora do RN (SINAN, 2010-2022)") %>%
+#   cols_label()
+
+```
+
+\newpage
+
+```{r,echo=FALSE}
+# Notificações por unidades notificadoras e tipo de unidade EM MULHERES
+
+load(paste0(path,"/cnes_estab202008.Rdata"))
+
+sinan_tp_uni_not <- sinan_anon %>%
+  filter(sg_sexo=="F") %>% 
+  group_by(cd_cnes_unid_not) %>% 
+  summarise(contagem = n()) 
+
+ntot_sinan_fem <- sum(sinan_tp_uni_not$contagem)
+
+sinan_tp_uni_not <- merge(sinan_tp_uni_not,select(cnes_estab,DS_TIPO_UNIDADE,CO_CNES),by.x="cd_cnes_unid_not",by.y="CO_CNES",all.x=T)
+
+
+sinan_tp_uni_not <- sinan_tp_uni_not %>% 
+  group_by(DS_TIPO_UNIDADE) %>% 
+  summarise(contagem = sum(contagem)) 
+
+
+sinan_tp_uni_not <- sinan_tp_uni_not%>%
+  mutate(perc = round(contagem/ntot_sinan_fem * 100,3)) %>%
+  ungroup() %>% 
+  group_by(DS_TIPO_UNIDADE) %>% 
+  summarise(n = sum(contagem, na.rm = TRUE),
+            Porcentagem = round(sum(perc, na.rm = TRUE),1)) %>%
+  arrange(-Porcentagem) %>% 
+  adorn_totals("row")
+  
+sinan_tp_uni_not <- sinan_tp_uni_not %>% 
+  mutate(DS_TIPO_UNIDADE=case_when(is.na(DS_TIPO_UNIDADE)~"Sem informação",
+                                   T~DS_TIPO_UNIDADE))
+
+
+
+# Formatando a tabela
+
+sinan_tp_uni_not %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações, do sexo feminino, por Tipo de Unidade Notificadora do RN (SINAN, 2010-2022)") %>%
+  cols_label(DS_TIPO_UNIDADE="Tipo de unidade notificadora")
+
+```
+
+\newpage
+
+```{r,echo=FALSE}
+# Notificações por unidades notificadoras e tipo de unidade
+
+load(paste0(path,"/cnes_estab202008.Rdata"))
+
+sinan_tp_uni_not <- sinan_anon %>% 
+  group_by(cd_cnes_unid_not) %>% 
+  summarise(contagem = n()) 
+
+sinan_tp_uni_not <- merge(sinan_tp_uni_not,select(cnes_estab,DS_TIPO_UNIDADE,CO_CNES),by.x="cd_cnes_unid_not",by.y="CO_CNES",all.x=T)
+
+
+sinan_tp_uni_not <- sinan_tp_uni_not %>% 
+  group_by(DS_TIPO_UNIDADE) %>% 
+  summarise(contagem = sum(contagem)) 
+
+
+sinan_tp_uni_not <- sinan_tp_uni_not%>%
+  mutate(perc = round(contagem/ntot_sinan * 100,3)) %>%
+  ungroup() %>% 
+  group_by(DS_TIPO_UNIDADE) %>% 
+  summarise(n = sum(contagem, na.rm = TRUE),
+            Porcentagem = round(sum(perc, na.rm = TRUE),1)) %>%
+  arrange(-Porcentagem) %>% 
+  adorn_totals("row")
+  
+sinan_tp_uni_not <- sinan_tp_uni_not %>% 
+  mutate(DS_TIPO_UNIDADE=case_when(is.na(DS_TIPO_UNIDADE)~"Sem informação",
+                                   T~DS_TIPO_UNIDADE))
+# Formatando a tabela
+
+sinan_tp_uni_not %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de notificações por Tipo de Unidade Notificadora do RN (SINAN, 2010-2022)") %>%
+  cols_label(DS_TIPO_UNIDADE="Tipo de unidade notificadora")
+
+```
+
+\newpage
+
+### SIM
+
+```{r, echo=FALSE}
+# Carregando a base
+load(paste0(path,"/sim_raw_anonimizada_09_07_2023.Rdata"))
+#load(paste0(path,"/tab_total_raw_sim.Rdata"))
+#load(paste0(path,"/tab_total_raw_sim_2010.Rdata"))
+
+sim_anon <- sim_anon %>% 
+  mutate(faixa_etaria_padrao=case_when(cd_idade<410~"0 a 9 anos",
+                                 cd_idade>409&cd_idade<420~"10 a 19 anos",
+                                 cd_idade>419&cd_idade<430~"20 a 29 anos",
+                                 cd_idade>429&cd_idade<460~"30 a 59 anos",
+                                 cd_idade>459~"60+",
+                                 T~as.character(cd_idade)))
+
+
+
+```
+
+O Sistema de Informações sobre Mortalidade (SIM) tem o propósito de reunir dados quantitativos e qualitativos sobre todos os óbitos ocorridos no Brasil.
+
+#### Informações gerais
+
+```{r,echo=FALSE}
+# Na base sim_anon o n é de 279.047 registros
+ntot_sim <- nrow(sim_anon)
+```
+
+No total, entre 2010 e 2022, o SIM tem `r ntot_sim` registros de óbito.
+
+```{r, echo=FALSE}
+# N e % de óbitos por ano e por sexo
+
+# Na base tab_sim_raw_totais o n é 280.221 registros
+
+tab_sim_raw_totais <- tab_2(sim_anon,ano,sg_sexo,pct=F)
+
+tab_sim_raw_totais%>%
+  arrange(ano) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros no SIM por ano e por sexo (2010-2022)") %>%
+  cols_label(ano = "Ano",
+             F = "Feminino",
+             `SEM INFORMACAO` = "Sem informação",
+             M = "Masculino")
+
+```
+
+```{r, echo=FALSE}
+# N e % de óbitos por causa de morte
+# icd_map <- read_xlsx("/Users/renatoteixeira/Library/CloudStorage/OneDrive-UniversidadeFederaldeMinasGerais/VS/Violência de gênero/ICD_GBD_2017_e_CID_BR.xlsx")
+# 
+# icd_map <- icd_map %>%
+#   mutate(CIDBR_RESUMIDO_EXTERNAS_resumo=case_when(icd_code_4=="B342"~"COVID-19",
+#                                                   T~CIDBR_RESUMIDO_EXTERNAS_resumo)) %>%
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(icd_code_4=="B342"~"COVID-19",
+#                                                   T~CIDBR_RESUMIDO_EXTERNAS)) %>%
+#   mutate(CID_BR_EXT_SEM_CG=case_when(icd_code_4=="B342"~"COVID-19",
+#                                    is.na(CID_BR_EXT_CG)==T~CIDBR_RESUMIDO_EXTERNAS,
+#                                    str_detect(CID_BR_EXT_CG,"CG-")==T~CIDBR_RESUMIDO_EXTERNAS,
+#                                                   T~CID_BR_EXT_CG))%>%
+#   select(icd_code_4,CID_BR_EXT_CG,CID_BR_EXT_SEM_CG,CIDBR_RESUMIDO_EXTERNAS,CIDBR_RESUMIDO_EXTERNAS_resumo)
+# 
+# save(icd_map,file=paste0(path,"/icd_map_ufmg.Rdata"))
+
+load(paste0(path,"/icd_map_ufmg.Rdata")) 
+
+sim_anon <- merge(sim_anon,icd_map,by.y="icd_code_4",by.x="cd_causabas",all.x=T)
+
+n_sem_causabas <- sim_anon %>% 
+  group_by(is.na(cd_causabas)) %>% 
+  summarise(n=n())
+  
+
+tab_sim_causas <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F), CID_BR_EXT_SEM_CG, sg_sexo, pct=F)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas <- 
+  bind_rows(
+    tab_sim_causas %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+tab_sim_causas_p <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F), CID_BR_EXT_SEM_CG, sg_sexo, pct=T)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_p <- 
+  bind_rows(
+    tab_sim_causas_p %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+
+
+```
+
+```{r, echo=FALSE}
+tab_sim_causas%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de óbitos por causa segundo sexo. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte",
+             F = "Feminino",
+             M = "Masculino")
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos óbitos por causa segundo sexo. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte",
+             F = "Feminino",
+             M = "Masculino")
+```
+
+#### Óbitos de mulheres
+
+```{r, echo=FALSE}
+# Causas externas por idade, com detalhamento das causas
+
+tab_sim_causas_f_externas <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F,
+                                          sg_sexo=="F",
+                                          str_detect(CID_BR_EXT_SEM_CG,"Ext ")==T), 
+                                   CID_BR_EXT_SEM_CG, faixa_etaria_padrao, pct=F)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_externas <- 
+  bind_rows(
+    tab_sim_causas_f_externas %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas_f_externas %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas_f_externas %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+tab_sim_causas_f_externas_p <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F,
+                                          sg_sexo=="F",
+                                          str_detect(CID_BR_EXT_SEM_CG,"Ext ")==T), 
+                                   CID_BR_EXT_SEM_CG, faixa_etaria_padrao, pct=T)
+# tab_sim_causas <- tab_sim_causas %>% 
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_externas_p <- 
+  bind_rows(
+    tab_sim_causas_f_externas_p %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas_f_externas_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas_f_externas_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+
+
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_externas%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de óbitos por causa externas em mulheres segundo faixa etária. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte")
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_externas_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos óbitos por causa externas em mulheres segundo faixa etária.. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte")
+```
+
+```{r, echo=FALSE}
+# Causas externas por raça/cor, com detalhamento das causas
+
+
+tab_sim_causas_f_externas_raca <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F,
+                                          sg_sexo=="F",
+                                          str_detect(CID_BR_EXT_SEM_CG,"Ext ")==T), 
+                                   CID_BR_EXT_SEM_CG, ds_raca, pct=F)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_externas_raca <- 
+  bind_rows(
+    tab_sim_causas_f_externas_raca %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas_f_externas_raca %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas_f_externas_raca %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+tab_sim_causas_f_externas_raca_p <- tab_2(filter(sim_anon,is.na(CID_BR_EXT_SEM_CG)==F,
+                                          sg_sexo=="F",
+                                          str_detect(CID_BR_EXT_SEM_CG,"Ext ")==T), 
+                                   CID_BR_EXT_SEM_CG, ds_raca, pct=T)
+# tab_sim_causas <- tab_sim_causas %>% 
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_externas_raca_p <- 
+  bind_rows(
+    tab_sim_causas_f_externas_raca_p %>%  
+      filter(!CID_BR_EXT_SEM_CG%in%c("Total","OUTRO")),
+    tab_sim_causas_f_externas_raca_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "OUTRO"),
+  tab_sim_causas_f_externas_raca_p %>%  
+      filter(CID_BR_EXT_SEM_CG == "Total")
+  )
+
+
+
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_externas_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de óbitos por causa externas em mulheres segundo raça cor. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte")
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_externas_raca_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos óbitos por causa externas em mulheres segundo raça cor. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(CID_BR_EXT_SEM_CG = "Causa de morte")
+```
+
+```{r, echo=FALSE}
+# Causas externas associadas à morte na gravidez, parto e puerpério. – Variáveis de interesse: GRAVIDEZ, GESTACAO, OBITOPARTO, OBITOGRAV e OBITOPUERP.
+
+#Criando variável grávida ou gestante
+sim_anon <- sim_anon %>% 
+  mutate(ds_gravida_gestante=case_when(cd_gravidez%in%c(1,2,3)|cd_gestacao%in%c(1,2,3,4,5,6)~"Grávida/Gestante",
+                                    T~"Não grávida/gestante"))
+
+tab_sim_causas_f_gravida <- tab_2(filter(sim_anon,sg_sexo=="F"),
+                                  ds_gravida_gestante, ds_raca, pct=F)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_gravida <- 
+  bind_rows(
+    tab_sim_causas_f_gravida %>%  
+      filter(!ds_gravida_gestante%in%c("Total","OUTRO")),
+    tab_sim_causas_f_gravida %>%  
+      filter(ds_gravida_gestante == "OUTRO"),
+  tab_sim_causas_f_gravida %>%  
+      filter(ds_gravida_gestante == "Total")
+  )
+
+tab_sim_causas_f_gravida_p <- tab_2(filter(sim_anon,sg_sexo=="F"),
+                                  ds_gravida_gestante, ds_raca, pct=T)
+# tab_sim_causas <- tab_sim_causas %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS)) %>% 
+#   mutate(CIDBR_RESUMIDO_EXTERNAS=case_when(is.na(CIDBR_RESUMIDO_EXTERNAS)==T~"OUTRO",
+#                                            T~CIDBR_RESUMIDO_EXTERNAS))
+tab_sim_causas_f_gravida_p <- 
+  bind_rows(
+    tab_sim_causas_f_gravida_p %>%  
+      filter(!ds_gravida_gestante%in%c("Total","OUTRO")),
+    tab_sim_causas_f_gravida_p %>%  
+      filter(ds_gravida_gestante == "OUTRO"),
+  tab_sim_causas_f_gravida_p %>%  
+      filter(ds_gravida_gestante == "Total")
+  )
+
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_gravida%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de óbitos em mulheres grávidas segundo raça cor. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(ds_gravida_gestante = "Grávida/Gestante")
+```
+
+```{r, echo=FALSE}
+tab_sim_causas_f_gravida_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos óbitos em mulheres grávidas segundo raça cor. Rio Grande do Norte, 2010-2022") %>%
+  cols_label(ds_gravida_gestante = "Grávida/Gestante")
+```
+
+\newpage
+
+```{r, echo=FALSE,incluse=FALSE}
+
+##SINAN encaminhamentos apenas sexo feminino
+
+sinan_anon <- merge(sinan_anon,dplyr::select(cnes_estab,DS_TIPO_UNIDADE,CO_CNES),by.x="cd_cnes_unid_not",by.y="CO_CNES",all.x=T)
+
+df_tp_estabs <- as.data.frame(table(sinan_anon$DS_TIPO_UNIDADE))
+
+df_tp_estabs <- df_tp_estabs %>% 
+  mutate(DS_TIPO_UNIDADE2=case_when(Freq<100~"Outro",
+                                    T~Var1)) %>% 
+  rename(DS_TIPO_UNIDADE=Var1) %>%
+  arrange(Freq) %>% 
+  dplyr::select(-Freq)
+
+sinan_anon <- merge(sinan_anon,df_tp_estabs,by="DS_TIPO_UNIDADE",all.x=T)
+
+vars_encaminha <- c(
+  "rede_sau" , "enc_tutela", "enc_vara", "enc_abrigo", "enc_sentin",
+  "enc_deam", "enc_dpca", "enc_deleg", "enc_mpu", "enc_mulher",
+  "enc_creas", "enc_iml", "enc_outr", "assist_soc",
+  "rede_educa", "atend_mulh", "cons_tutel", "cons_ido", "deleg_idos",
+  "dir_human", "mpu", "deleg_cria", "deleg_mulh", "deleg",
+  "infan_juv", "defen_publ"
+)
+
+# Create binary variables with "fl_" prefix
+for (var in vars_encaminha) {
+  new_var_name <- paste0("fl_", var)
+  sinan_anon <- sinan_anon %>%
+    mutate(!!new_var_name := case_when(banco=="SINAN" & !!as.name(var) == 1 ~ 1,
+                                       T~0))
+}
+
+sinan_anon <-
+  sinan_anon %>%
+  mutate(
+    rede_enc_sau = case_when((rede_sau=="1" | enc_saude=="1")~1,
+                             T~0),
+    assit_soc_creas = case_when((assist_soc=="1" |enc_creas=="1")~1,
+                                T~0), # abrigo
+    atend_enc_mulh = case_when((atend_mulh=="1" | enc_mulher=="1")~1,
+                               T~0),
+    cons_enc_tutela = case_when((cons_tutel=="1" | enc_tutela=="1")~1,
+                                T~0),
+    mpu_enc_mpu = case_when((mpu=="1" | enc_mpu=="1")~1,
+                            T~0),
+    deleg_enc_cria = case_when((deleg_cria=="1"|enc_dpca=="1")~1,
+                               T~0),
+    deleg_enc_mulh = case_when((deleg_mulh=="1"| enc_deam=="1")~1,
+                               T~0),
+    deleg_enc_deleg = case_when((deleg=="1"|enc_deleg=="1")~1,
+                                T~0),
+    infan_enc_juv = case_when((infan_juv=="1"|enc_vara=="1")~1,
+                              T~0)
+  )
+
+nomes_encaminhamentos1 <- c("rede_enc_sau", "assit_soc_creas","atend_enc_mulh","cons_enc_tutela","mpu_enc_mpu", 
+                           "deleg_enc_cria","deleg_enc_mulh","deleg_enc_deleg","infan_enc_juv")
+
+
+sinan_anon <- sinan_anon %>%
+  mutate(sum_enc_nenhum = rowSums(dplyr::select(., all_of(nomes_encaminhamentos1)), na.rm = TRUE),
+         enc_nenhum=case_when(sum_enc_nenhum==0~1,
+                              T~0))
+
+
+
+nomes_encaminhamentos <- c("rede_enc_sau", "assit_soc_creas","atend_enc_mulh","cons_enc_tutela","mpu_enc_mpu", 
+                           "deleg_enc_cria","deleg_enc_mulh","deleg_enc_deleg","infan_enc_juv","enc_nenhum")
+
+tab_tipo_encaminhamentos <- tibble()
+
+tipo_encaminhamento_f <- tibble()
+
+for (i in 1:length(nomes_encaminhamentos)){
+  nm <- nomes_encaminhamentos[i]
+  f <- as.formula(paste(nomes_encaminhamentos[i], " ~ DS_TIPO_UNIDADE2"))
+  tab_encaminhamento <- filter(sinan_anon,sg_sexo=="F") %>% 
+    mutate(n_ob=1) %>% 
+    dcast(f, value.var='n_ob', sum) %>% 
+    adorn_totals("col")
+  names(tab_encaminhamento)[1] <- c("tipo_encaminhamento")
+  tab_encaminhamento <- tab_encaminhamento %>% 
+    filter(tipo_encaminhamento==1) %>% 
+    mutate(tipo_encaminhamento=nomes_encaminhamentos[i])
+  tipo_encaminhamento_f <- rbind(tipo_encaminhamento_f,tab_encaminhamento)
+  
+}
+
+tab_encaminhamento_total <- filter(sinan_anon,sg_sexo=="F") %>% 
+  mutate(n_ob=1) %>% 
+  dcast(f, value.var='n_ob', sum) %>% 
+  adorn_totals("row") %>% 
+  adorn_totals("col")
+
+names(tab_encaminhamento_total)[1] <- c("tipo_encaminhamento")
+
+tab_encaminhamento_total <- tab_encaminhamento_total%>% 
+  filter(tipo_encaminhamento=="Total")
+
+tipo_encaminhamento_f <- rbind(tipo_encaminhamento_f,tab_encaminhamento_total)
+
+
+total_row <- tipo_encaminhamento_f[tipo_encaminhamento_f$tipo_encaminhamento == "Total", ] %>% 
+  rename("Sem informação"=`NA`)
+
+colunas_para_calcular_proporcoes <- tipo_encaminhamento_f
+
+long_data <- tipo_encaminhamento_f %>%
+  pivot_longer(cols = -tipo_encaminhamento, names_to = "Variable", values_to = "Value")
+
+
+long_data_total <- total_row %>%
+  pivot_longer(cols = -tipo_encaminhamento, names_to = "Variable", values_to = "Value")
+
+colunas_para_calcular_proporcoes <- merge(long_data,long_data_total,by="Variable",all.x=T) %>% 
+  rename(tipo_encaminhamento=tipo_encaminhamento.x)
+
+colunas_para_calcular_proporcoes <- colunas_para_calcular_proporcoes %>% 
+  mutate(Prop=round(as.numeric(Value.x/Value.y)*100,2)) %>% 
+  dplyr::select(Variable,tipo_encaminhamento,Prop) %>% 
+  mutate(Variable=case_when(Variable=="NA"~"Sem informação",
+                            T~Variable))
+
+
+wide_data <- spread(colunas_para_calcular_proporcoes, key = Variable, value = Prop) %>% 
+  arrange(-Total)
+wide_data[is.na(wide_data)] <- 0
+
+
+
+
+wide_data <- rbind(filter(wide_data,!tipo_encaminhamento=="Total"),total_row) %>% 
+  mutate(tipo_encaminhamento=case_when(tipo_encaminhamento=="Total"~"Total (n mulheres)",
+                                       T~tipo_encaminhamento)) 
+wide_data <- wide_data %>%
+  dplyr::select(
+    "tipo_encaminhamento",
+    "CENTRAL DE GESTAO EM SAUDE",
+    "CENTRO DE ATENCAO PSICOSSOCIAL",
+    "CENTRO DE SAUDE/UNIDADE BASICA",
+    "HOSPITAL ESPECIALIZADO",
+    "HOSPITAL GERAL",
+    "POLICLINICA",
+    "PRONTO ATENDIMENTO",
+    "UNIDADE MISTA",
+    "Outro",
+    "Sem informação",
+    "Total"
+  )
+
+
+encaminhamentos_prop <- tipo_encaminhamento_f %>% 
+  dplyr::select(tipo_encaminhamento,Total) 
+
+total_n_enc=as.vector(tail(encaminhamentos_prop,1)[2])
+
+
+encaminhamentos_prop <- encaminhamentos_prop %>%
+  mutate(prop =round(as.numeric(Total)/total_n_enc$Total*100,1))
+
+labels_encaminha <- data.frame(tipo_encaminhamento=c("rede_enc_sau",
+                                                     "assit_soc_creas",
+                                                     "atend_enc_mulh",
+                                                     "cons_enc_tutela",
+                                                     "mpu_enc_mpu",
+                                                     "deleg_enc_cria",
+                                                     "deleg_enc_mulh",
+                                                     "deleg_enc_deleg",
+                                                     "infan_enc_juv",
+                                                     "enc_nenhum",
+                                                     "Total"),
+                               tipo_encaminhamento_label=c("Saúde",
+                                                     "Assitência Social",
+                                                     "Atendimento a Mulher",
+                                                     "Conselho Tutelar",
+                                                     "Min. Público",
+                                                     "Delg. Adolesc. e Criança",
+                                                     "Deleg. Atend. a Mulher",
+                                                     "Outras deleg.",
+                                                     "Justiça Inf. Adolesc.",
+                                                     "Nenhum encaminhamento",
+                                                     "Total"))
+                
+
+encaminhamentos_prop_label <- merge(encaminhamentos_prop,labels_encaminha,by="tipo_encaminhamento",all.x=T)   
+ 
+encaminhamentos_prop_label <- encaminhamentos_prop_label %>% 
+  select(tipo_encaminhamento_label,Total,prop)
+
+names(encaminhamentos_prop_label) <- c("Tipo de encaminhamento","N","%")
+
+tab_nnehum_enc <- filter(sinan_anon,sg_sexo=="F") %>% 
+  group_by(enc_nenhum) %>% 
+  summarise(n=n()) %>% 
+  adorn_totals("row")
+
+tot_n_enc=as.vector(tail(tab_nnehum_enc,1)[2])
+
+tab_nnehum_enc <- tab_nnehum_enc %>% 
+  mutate(prop =round(as.numeric(tab_nnehum_enc$n) / as.numeric(tot_n_enc$n)*100,1))
+
+
+```
+
+```{r, echo=FALSE}
+tab_nnehum_enc %>%
+  mutate(enc_nenhum = case_when(
+    enc_nenhum == "1" ~ "Sem encaminhamento",
+    enc_nenhum == "0" ~ "Com encaminhamento",
+    TRUE ~ as.character(enc_nenhum)
+  ))%>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número e proporção de notificações, do sexo feminino, sem encaminhamento . Rio Grande do Norte, SINAN, 2010-2022") %>%
+  cols_label(enc_nenhum = "Encaminhamento")
+```
+
+```{r, echo=FALSE}
+encaminhamentos_prop_label %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número e proporção de notificações, do sexo femino, por tipo de encaminhamento . Rio Grande do Norte, SINAN, 2010-2022") 
+```
+
+```{r, echo=FALSE}
+wide_data2 <- merge(wide_data,labels_encaminha,by="tipo_encaminhamento",all.x=T) %>% 
+  select(13,2:12)
+
+wide_data2 <- wide_data2 %>% 
+  mutate(tipo_encaminhamento_label=case_when(is.na(tipo_encaminhamento_label)==T~"N mulheres",
+           T~tipo_encaminhamento_label))
+
+
+ wide_data2 %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos encaminhamento segundo principais tipos de estabelecimentos. Rio Grande do Norte, SINAN, 2010-2022") %>%
+  cols_label(tipo_encaminhamento_label = "Tipo de encaminhamento")
+```
+
+\newpage
+
+### SIH
+
+O Sistema de Informações Hospitalares (SIH), também conhecido como Sistema AIH, tem a finalidade de registrar todos os atendimentos provenientes de internações hospitalares que foram financiados pelo SUS. Após o processamento, essas internações geram gelatórios para que os gestores possam realizar pagamentos para os estabelecimentos de saúde. Apesar de não ser um banco de dados idealizado para a extração de dados sobre violência e suas consequências, os dados sobre internações de mulheres podem nos ajudar a qualificar o fenômeno da violência de gênero. Neste estudo foram usados dados do SIH entre 2015-2021.
+
+```{r, echo=FALSE}
+# Carregando a base
+
+# Base total
+load(paste0(path,"/sih_anon_09_07_2023.Rdata"))
+
+# Tabela sumarizada, com N de registros por ano e por sexo
+#load(paste0(path,"/tab_sih_inicial.Rdata"))
+```
+
+#### Informações gerais
+
+```{r, echo=FALSE}
+# Transformação da variável raça/cor e criação da faixa etária e dias de internação
+sih_anon <- sih_anon %>% 
+  mutate( cd_idade=as.integer(cd_idade),
+          ds_raca=case_when(cd_raca=="1"~"Branca",
+                            cd_raca=="2"~"Preta",
+                            cd_raca=="3"~"Parda",
+                            cd_raca=="4"~"Amarela",
+                            cd_raca=="5"~"Indígena",
+                            T~"Ignorada"),
+          faixa_etaria=case_when(cd_idade<10~"0 a 9 anos",
+                                 cd_idade>09&cd_idade<20~"10 a 19 anos",
+                                 cd_idade>19&cd_idade<30~"20 a 29 anos",
+                                 cd_idade>29&cd_idade<60~"30 a 59 anos",
+                                 cd_idade>59~"60+",
+                                 T~as.character(cd_idade)),
+          dias_int=ymd(dt_saida)-ymd(dt_internacao))
+
+
+```
+
+```{r, echo=FALSE}
+# Total de internações na base sih_anon
+ntot_sih <- nrow(sih_anon)
+```
+
+Ao todo, o SIH possui `r ntot_sih` registros de internação no período entre 2015 e 2021. Com relação à quantidade de internação por sexo dos pacientes:
+
+```{r, echo=FALSE}
+# Quantidade de internações por ano (contagem e % de autorizações de internação hospitalar por ano)
+
+
+tab_sih_inicial <- tab_2(sih_anon,ano,sg_sexo,pct=F)
+
+tab_sih_inicial%>%
+  arrange(ano) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros no SIH por ano e por sexo (2015-2021)") %>%
+  cols_label(ano = "Ano",
+             F = "Feminino",
+             M = "Masculino")
+```
+
+```{r, echo=FALSE}
+# Distribuição por Diagnósticos Secundários por ano (cd_diag_sec por ano)
+
+sih_anon <- sih_anon %>% 
+  merge(icd_map,by.x="cd_diag_pri",by.y="icd_code_4",all.x=T)
+
+  
+sih_anon <- sih_anon %>% 
+  rename(CID_BR_EXT_SEM_CG_diag_prim=CID_BR_EXT_SEM_CG,
+         CID_BR_EXT_CG_diag_prim=CID_BR_EXT_CG,
+         CIDBR_RESUMIDO_EXTERNAS_diag_prim=CIDBR_RESUMIDO_EXTERNAS,
+         CIDBR_RESUMIDO_EXTERNAS_resumo_diag_prim=CIDBR_RESUMIDO_EXTERNAS_resumo)
+#Sexo feminino
+tab_sih_diag_prim <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_prim=case_when(is.na(CID_BR_EXT_SEM_CG_diag_prim)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_prim)),
+                            CID_BR_EXT_SEM_CG_diag_prim, ano, pct=F) %>% 
+  select(CID_BR_EXT_SEM_CG_diag_prim,`2015`,`2016`,`2017`,`2018`,`2019`,`2020`,`2021`,Total)
+
+
+tab_sih_diag_prim <- 
+  bind_rows(
+    tab_sih_diag_prim %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_prim%in%c("Total","Sem informação")),
+    tab_sih_diag_prim %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_prim == "Sem informação"),
+  tab_sih_diag_prim %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_prim == "Total")
+  )
+
+
+tab_sih_diag_prim_p <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_prim=case_when(is.na(CID_BR_EXT_SEM_CG_diag_prim)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_prim)),
+                            CID_BR_EXT_SEM_CG_diag_prim, ano, pct=T) %>% 
+  select(CID_BR_EXT_SEM_CG_diag_prim,`2015`,`2016`,`2017`,`2018`,`2019`,`2020`,`2021`,Total)
+
+
+tab_sih_diag_prim_p <- 
+  bind_rows(
+    tab_sih_diag_prim_p %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_prim%in%c("Total","Sem informação")),
+    tab_sih_diag_prim_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_prim == "Sem informação"),
+  tab_sih_diag_prim_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_prim == "Total")
+  )
+
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_prim%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de internações, do sexo feminino, por diagnóstico primário. Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_prim = "Diagnóstico primário de internação")
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_prim_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional das internações, do sexo feminino, por diagnóstico primário. Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_prim = "Diagnóstico primário de internação")
+```
+
+```{r, echo=FALSE,include=FALSE}
+# Tempo de internação por diagnóstico secundário associados a violência (cd_diag_sec com filtro das CIDs relacionadas a violência).
+
+sih_anon <- sih_anon %>% 
+  mutate(tmp_inter_dias=as.integer(ymd(dt_saida)-ymd(dt_internacao)))
+
+
+
+#Feminino
+dscp_tmp_int_agress_m <- round(data.frame(unclass(summary(filter(sih_anon,CID_BR_EXT_SEM_CG_diag_prim=="Ext X85-Y09 Agressões",
+                                                                 sg_sexo=="M")$tmp_inter_dias)),
+                                          check.names = FALSE),1)
+
+dscp_tmp_int_agress_m <- bind_cols(data.frame(Descritivas=c("Mínimo","Quartil 1","Mediana","Média","Quartil 3", "Máximo")),
+                                   dscp_tmp_int_agress_m)                    
+
+rownames(dscp_tmp_int_agress_m) <- NULL
+names(dscp_tmp_int_agress_m) <- c("Descritivas","Masculino")
+
+
+
+
+dscp_tmp_int_agress_f <- round(data.frame(unclass(summary(filter(sih_anon,CID_BR_EXT_SEM_CG_diag_prim=="Ext X85-Y09 Agressões",
+                                                                 sg_sexo=="F")$tmp_inter_dias)),  
+                                          check.names = FALSE),1)
+
+dscp_tmp_int_agress_f <- bind_cols(data.frame(Descritivas=c("Mínimo","Quartil 1","Mediana","Média","Quartil 3", "Máximo")),
+                                   dscp_tmp_int_agress_f)                    
+
+rownames(dscp_tmp_int_agress_f) <- NULL
+names(dscp_tmp_int_agress_f) <- c("Descritivas","Feminino")
+
+
+dscp_tmp_int_agress_tab <- merge(dscp_tmp_int_agress_m,dscp_tmp_int_agress_f,by="Descritivas")
+
+
+
+```
+
+#### Descritivas do tempo de internação com diagnóstico secundário relacionado à agressões segundo sexo. Rio Grande do Norte, SIH, 2015-2021
+
+```{r, echo=FALSE}
+# Filtro sexo feminino e diagnóstico secundário relacionado à violência
+dscp_tmp_int_agress_tab %>% 
+  gt()
+
+```
+
+```{r, echo=FALSE}
+# Diagnósticos principais (cd_diag_pri) relacionados a violência por raça/cor mantendo Ignorado 
+
+sih_anon <- sih_anon %>% 
+  merge(icd_map,by.x="cd_diag_sec_1",by.y="icd_code_4",all.x=T)
+
+  
+sih_anon <- sih_anon %>% 
+  rename(CID_BR_EXT_SEM_CG_diag_sec_1=CID_BR_EXT_SEM_CG,
+         CID_BR_EXT_CG_diag_sec_1=CID_BR_EXT_CG,
+         CIDBR_RESUMIDO_EXTERNAS_diag_sec_1=CIDBR_RESUMIDO_EXTERNAS,
+         CIDBR_RESUMIDO_EXTERNAS_resumo_diag_sec_1=CIDBR_RESUMIDO_EXTERNAS_resumo)
+
+tab_sih_diag_sec_1_raca <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_sec_1=case_when(is.na(CID_BR_EXT_SEM_CG_diag_sec_1)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_sec_1)),
+                            CID_BR_EXT_SEM_CG_diag_sec_1, ds_raca, pct=F)
+
+tab_sih_diag_sec_1_raca <- 
+  bind_rows(
+    tab_sih_diag_sec_1_raca %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_sec_1%in%c("Total","Sem informação")),
+    tab_sih_diag_sec_1_raca %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Sem informação"),
+  tab_sih_diag_sec_1_raca %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Total")
+  )
+
+
+tab_sih_diag_sec_1_raca_p <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_sec_1=case_when(is.na(CID_BR_EXT_SEM_CG_diag_sec_1)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_sec_1)),
+                            CID_BR_EXT_SEM_CG_diag_sec_1, ds_raca, pct=T)
+
+
+tab_sih_diag_sec_1_raca_p <- 
+  bind_rows(
+    tab_sih_diag_sec_1_raca_p %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_sec_1%in%c("Total","Sem informação")),
+    tab_sih_diag_sec_1_raca_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Sem informação"),
+  tab_sih_diag_sec_1_raca_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Total")
+  )
+
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_sec_1_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de internações, do sexo feminino, por diagnóstico secundário de internação e raça/cor Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_sec_1 = "Diagnóstico primário de internação")
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_sec_1_raca_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional das internações, do sexo feminino, por diagnóstico secundário de internação e raça/cor Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_sec_1 = "Diagnóstico secundário de internação")
+```
+
+```{r, echo=FALSE}
+# Diagnósticos principais (cd_diag_pri) relacionados a violência por idade mantendo Ignorado 
+tab_sih_diag_sec_1_fxetaria <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_sec_1=case_when(is.na(CID_BR_EXT_SEM_CG_diag_sec_1)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_sec_1)),
+                            CID_BR_EXT_SEM_CG_diag_sec_1, faixa_etaria, pct=F)
+
+tab_sih_diag_sec_1_fxetaria <- 
+  bind_rows(
+    tab_sih_diag_sec_1_fxetaria %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_sec_1%in%c("Total","Sem informação")),
+    tab_sih_diag_sec_1_fxetaria %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Sem informação"),
+  tab_sih_diag_sec_1_fxetaria %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Total")
+  )
+
+tab_sih_diag_sec_1_fxetaria <- tab_sih_diag_sec_1_fxetaria %>% 
+  select(CID_BR_EXT_SEM_CG_diag_sec_1,`0 a 9 anos`,`10 a 19 anos`,`20 a 29 anos`,`30 a 59 anos`,`60+`,Total)
+
+tab_sih_diag_sec_1_fxetaria_p <- tab_2(filter(sih_anon,sg_sexo=="F") %>% 
+                              mutate(CID_BR_EXT_SEM_CG_diag_sec_1=case_when(is.na(CID_BR_EXT_SEM_CG_diag_sec_1)==T~"Sem informação",
+                                                                            T~CID_BR_EXT_SEM_CG_diag_sec_1)),
+                            CID_BR_EXT_SEM_CG_diag_sec_1, faixa_etaria, pct=T)
+
+
+tab_sih_diag_sec_1_fxetaria_p <- 
+  bind_rows(
+    tab_sih_diag_sec_1_fxetaria_p %>%  
+      filter(!CID_BR_EXT_SEM_CG_diag_sec_1%in%c("Total","Sem informação")),
+    tab_sih_diag_sec_1_fxetaria_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Sem informação"),
+  tab_sih_diag_sec_1_fxetaria_p %>%  
+      filter(CID_BR_EXT_SEM_CG_diag_sec_1 == "Total")
+  )
+
+tab_sih_diag_sec_1_fxetaria_p <- tab_sih_diag_sec_1_fxetaria_p %>% 
+  select(CID_BR_EXT_SEM_CG_diag_sec_1,`0 a 9 anos`,`10 a 19 anos`,`20 a 29 anos`,`30 a 59 anos`,`60+`,Total)
+
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_sec_1_fxetaria%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de óbitos por diagnóstico secundário de internação por faixa etária. Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_sec_1 = "Diagnóstico secundário de internação")
+```
+
+```{r, echo=FALSE}
+tab_sih_diag_sec_1_fxetaria_p%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Distribuição proporcional dos óbitos por diagnóstico secundário de internação por faixa etária. Rio Grande do Norte, SIH, 2015-2021") %>%
+  cols_label(CID_BR_EXT_SEM_CG_diag_sec_1 = "Diagnóstico secundário de internação")
+```
+
+### Dados da Secretaria de Segurança de Estado da Segurança Pública e Defesa Social (SESED)
+
+A base de dados da Secretaria de Segurança Pública de Estado e Defesa Social traz informações sobre ocorrências registradas cuja vítima é do sexo feminino. Além desse filtro, que foi feito no momento da transferência dos dados, também há uma filtragem pelo tipo de ocorrência. Foram solicitados dados referentes aos seguintes crimes:
+
+Foram recebidas três bases de dados: uma com ocorrências com vítimas crianças e idosos, uma com informações sobre mulheres adultas e uma terceira base com registros de óbitos.
+
+```{r, echo=FALSE}
+# Carregando os dados
+
+# Base completa
+load(paste0(path,"/sesap_anon_08_11_2023_final.Rdata"))
+
+# Tabela sumarizada, com n por base e por ano
+tab_sesap_inicial <- tab_2(sesap_anon, ano, banco)
+
+
+```
+
+#### Informações gerais
+
+```{r, echo=FALSE}
+ntot_sesed <- nrow(sesap_anon)
+```
+
+Nas bases de dados recebidas, há registro de `r ntot_sesed` Boletins de Ocorrência entre 2015 e 2022. Estes registros referem-se apenas a vítimas do sexo feminino e para crimes especificados no momento do pedido de dados.
+
+Esses registros se dividem entre os anos e as bases de dados recebidas da seguinte forma:
+
+```{r, echo=FALSE}
+# Boletins de Ocorrência por ano
+
+tab_sesap_inicial %>%
+  arrange(ano) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title="Quantidade de registros de ocorrência por base de dados e por ano (SESED, 2015-2022)") %>%
+  cols_label(ano = "Ano",
+             SESAP_OB = "B.O.s letais",
+             SESAP = "B.O.s não letais")
+```
+
+Nota-se que até 2018 há apenas registros de óbitos e, a partir de 2019, as ocorrências não letais passam a ser registradas no banco de dados. Por isso, a maior quantidade de registros se concentra entre 2019 e 2022.
+
+#### Perfil da violência
+
+Com relação aos crimes não letais, temos a prevalência do crime de ameaça, seguida de lesão corporal e difamação:
+
+```{r, echo=FALSE}
+# Total de BOs por crime não letal
+
+table(sesap_anon$banco)
+
+tot_sesed_n_let <- nrow(sesap_anon %>% filter(banco == "SESAP"))
+
+# Calculando n e % de tipos penais não letais
+tipos_penais <- filter(sesap_anon,banco == "SESAP") %>%
+  filter(ds_tp_ocor!=is.na(ds_tp_ocor)) %>%
+  group_by(ds_tp_ocor) %>%
+  summarise(n_obs = n()) %>%
+  mutate(perc=round(n_obs/tot_sesed_n_let*100,1)) %>%
+  arrange(desc(perc))
+
+tipos_penais <-  tab_1(filter(sesap_anon,banco == "SESAP"), ds_tp_ocor,col_nome = "Tipo penal")
+
+tipos_penais%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+   tab_header(title = "Tipos penais registrados (SESED, 2015-2022)")
+  # cols_label(ds_tp_ocor = "Tipo penal",
+  #            n_obs = "Qtd de registros",
+  #            perc = "Percentual")
+
+```
+
+Para os crimes não letais não há informações sobre o local de ocorrência.
+
+```{r, echo=FALSE}
+# Boletins de Ocorrência por local de ocorrência
+
+ntot_sesed <- nrow(sesap_anon)
+
+tab_sesed_locoo <- sesap_anon %>% 
+  group_by(lococor) %>% 
+  summarise(contagem = n()) %>%
+  mutate(perc = round(contagem/ntot_sesed * 100,3),
+         lococor = case_when(perc < 4 ~ "OUTRO", TRUE ~ lococor)) %>%
+  ungroup() %>% 
+  group_by(lococor) %>% 
+  summarise(n = sum(contagem, na.rm = TRUE),
+            Porcentagem = sum(perc, na.rm = TRUE)) %>%
+  adorn_totals("row") %>% 
+  arrange(-Porcentagem)
+  
+
+tab_sesed_locoo <- 
+  bind_rows(
+    tab_sesed_locoo %>%  
+      filter(!lococor%in%c("Total","OUTRO")),
+    tab_sesed_locoo %>%  
+      filter(lococor == "OUTRO"),
+  tab_sesed_locoo %>%  
+      filter(lococor == "Total")
+  )
+
+tab_sesed_locoo <- tab_sesed_locoo %>%
+  mutate(Porcentagem=case_when(lococor=="Total"~100.0,
+                               T~Porcentagem))
+
+# N e % de notificações por raça/cor
+# Tabela
+tab_sesed_locoo %>% 
+  mutate(lococor=str_to_title(lococor)) %>% 
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número e proporção de boletins no SESED por local de ocorrência. SESED, Rio Grande do Norte, 2015-2022)") %>% 
+  cols_label(lococor="Local de ocorrência")
+```
+
+Já com relação aos crimes letais, 62,9% das ocorrências foram registradas como Homicídio Doloso e 25,2% como Feminicídio.
+
+```{r, echo=FALSE}
+# Total de BOs por crimes letais
+tab_sesed_tp_obito <-  tab_1(
+  filter(sesap_anon,is.na(ds_tp_obito)==F), ds_tp_obito,col_nome = "Tipo penal")
+
+
+tab_sesed_tp_obito%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Tipos penais registrados nos óbitos dos boletins.(SESED, 2015-2022)")
+
+```
+
+No caso dos Boletins de Ocorrência de crimes letais, há informações sobre o local de ocorrência, sendo a residência o principal local de vitimização das mulheres.
+
+```{r,echo=FALSE}
+# Local de ocorrência para BOs letais
+tab_sesed_tp_obito_loc <-  tab_1(
+  filter(sesap_anon,is.na(ds_tp_obito)==F), ds_local_ocorr,col_nome = "Local de ocorrência")
+
+
+tab_sesed_tp_obito_loc%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Local de ocorrência registrado nos óbitos dos boletins.(SESED, 2015-2022)")
+
+```
+
+#### Perfil das vítimas
+
+Com relação à raça das vítimas, a maior parte (49,3%) foi registrada como parda. Também há grande prelavência de registros de mulheres brancas (30,3%). Chama atenção que 14,9% dos registros de ocorrência tiveram o campo raça/cor ignorado:
+
+```{r, echo=FALSE}
+# BOs por raça/cor
+
+bo_raca <-  tab_1(sesap_anon, ds_raca,col_nome = "Raça/Cor")
+
+bo_raca %>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Quantidade de registros por Raça/Cor (SESED, 2015-2022)")
+```
+
+Com relação à idade das vítimas, a maior parte dos registros diz respeito a mulheres adultas: 25,9% para mulheres entre 20 e 29 anos e 55,2% para mulheres entre 30 e 59 anos. Em 23 registros não há informação sobre a idade da vítima.
+
+```{r, echo=FALSE}
+# BOs por faixa etária
+
+# Criando a variável faixa etária
+sesap_anon <- sesap_anon %>% 
+  mutate( nu_idade_anos=as.integer(nu_idade_anos),
+          faixa_etaria=case_when(nu_idade_anos<10~"0 a 9 anos",
+                                 nu_idade_anos>09&nu_idade_anos<20~"10 a 19 anos",
+                                 nu_idade_anos>19&nu_idade_anos<30~"20 a 29 anos",
+                                 nu_idade_anos>29&nu_idade_anos<60~"30 a 59 anos",
+                                 nu_idade_anos>59~"60+"))
+
+```
+
+```{r, echo=FALSE}
+# Gerando a tabela com n e % por faixa etária
+bo_faixaetaria <-  tab_1(sesap_anon, faixa_etaria,col_nome = "Faixa etária") %>% 
+  arrange(`Faixa etária`)
+
+bo_faixaetaria %>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Boletins de ocorrência por faixa etária da vítima (SESED, 2015-2022)")
+
+
+```
+
+Importante destacar que o registro não inclui a data de nascimento da vítima, apenas a idade.
+
+O cruzamento entre o tipo de crime e a raça da vítima indica que as mulheres pardas são as principais vítimas para todos os tipos de crime identificados:
+
+```{r,echo=FALSE}
+
+# Tipos de crime não letais por raça/cor
+
+
+
+tipos_penais_raca <- tab_2(sesap_anon, ds_tp_ocor, ds_raca, pct=F)
+tipos_penais_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros por tipos de crime segundo raça cor. SESED, 2015-2022")%>% 
+  cols_label(ds_tp_ocor = "Tipo de crime")
+
+
+tipos_penais_raca <- tab_2(sesap_anon, ds_tp_ocor, ds_raca, pct=TRUE)
+tipos_penais_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção registros por tipos de crime segundo raça cor. SESED, 2015-2022") %>% 
+  cols_label(ds_tp_ocor = "Tipo de crime")
+
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+# Tipos de crimes não letais por faixa etária
+
+tipos_penais_idade <- tab_2(
+  filter(sesap_anon,ds_tp_ocor!=is.na(ds_tp_ocor)), 
+  ds_tp_ocor, faixa_etaria, pct=F)
+
+
+tipos_penais_idade%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros de crimes não letais por faixa etária (SESED, 2015-2022)")%>% 
+  cols_label(ds_tp_ocor = "Tipo de crime não letal")
+
+tipos_penais_idade <- tab_2(
+  filter(sesap_anon,ds_tp_ocor!=is.na(ds_tp_ocor)), 
+  ds_tp_ocor, faixa_etaria, pct=TRUE)
+
+
+
+
+tipos_penais_idade%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de registros de crimes não letais por faixa etária (SESED, 2015-2022)")%>% 
+  cols_label(ds_tp_ocor = "Tipo de crime não letal")
+
+
+```
+
+```{r, echo=FALSE}
+# Tipos de crimes letais por raça/cor
+
+tipos_penais_morte_raca <- tab_2(
+  filter(sesap_anon,ds_tp_obito!=is.na(ds_tp_obito)),
+  ds_tp_obito, ds_raca, pct=F) %>% 
+  arrange(-Total)
+
+tipos_penais_morte_raca <- bind_rows(
+  tipos_penais_morte_raca %>% 
+    filter(!ds_tp_obito=="Total"),
+  tipos_penais_morte_raca %>% 
+    filter(ds_tp_obito=="Total")
+)
+
+tipos_penais_morte_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros de crimes letais por raça/cor (SESED, 2015-2022)")%>% 
+  cols_label(ds_tp_obito = "Tipo de crime letal")
+
+
+
+tipos_penais_morte_raca <- tab_2(
+  filter(sesap_anon,ds_tp_obito!=is.na(ds_tp_obito)),
+  ds_tp_obito, ds_raca, pct=T)%>% 
+  arrange(-Total)
+
+tipos_penais_morte_raca <- bind_rows(
+  tipos_penais_morte_raca %>% 
+    filter(!ds_tp_obito=="Total"),
+  tipos_penais_morte_raca %>% 
+    filter(ds_tp_obito=="Total")
+)
+
+
+tipos_penais_morte_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de registros de crimes letais por raça/cor (SESED, 2015-2022)")%>% 
+  cols_label(ds_tp_obito = "Tipo de crime letal")
+
+
+
+```
+
+```{r, echo=FALSE}
+# Tipos de crimes letais por faixa etária
+
+tipos_penais_morte_raca <- tab_2(
+  filter(sesap_anon,ds_tp_obito!=is.na(ds_tp_obito)),
+  ds_tp_obito, faixa_etaria, pct=F)%>% 
+  arrange(-Total)
+
+tipos_penais_morte_raca <- bind_rows(
+  tipos_penais_morte_raca %>% 
+    filter(!ds_tp_obito=="Total"),
+  tipos_penais_morte_raca %>% 
+    filter(ds_tp_obito=="Total")
+)
+
+tipos_penais_morte_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Número de registros de crimes letais por faixa etária (SESED, 2015-2022)") %>% 
+  cols_label(ds_tp_obito = "Tipo de crime letal")
+
+
+tipos_penais_morte_raca <- tab_2(
+  filter(sesap_anon,ds_tp_obito!=is.na(ds_tp_obito)),
+  ds_tp_obito, faixa_etaria, pct=T)%>% 
+  arrange(-Total)
+
+tipos_penais_morte_raca <- bind_rows(
+  tipos_penais_morte_raca %>% 
+    filter(!ds_tp_obito=="Total"),
+  tipos_penais_morte_raca %>% 
+    filter(ds_tp_obito=="Total")
+)
+
+tipos_penais_morte_raca%>%
+  gt() %>%
+  tab_style(
+    style = list(
+      cell_text(
+        align = "center",
+        weight = 'bold',
+      )
+    ),
+    locations = list(
+      cells_title(groups = c("title"))
+    )) %>% 
+  tab_header(title = "Proporção de registros de crimes letais por faixa etária (SESED, 2015-2022)")%>% 
+  cols_label(ds_tp_obito = "Tipo de crime letal")
+
+```
